@@ -173,43 +173,89 @@ def save_reports_db(data: Dict[str, Any]):
     with open(REPORTS_DB_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
 
+def _normalize_report(r: Dict[str, Any]) -> Dict[str, Any]:
+    norm = dict(r)
+    now_ms = int(time.time() * 1000)
+    ts = norm.get("timestamp") or norm.get("created_at") or now_ms
+    if isinstance(ts, (int, float)) and ts < 10000000000:
+        ts = int(ts * 1000)
+    norm["timestamp"] = int(ts)
+    if "question" not in norm and "title" in norm:
+        norm["question"] = norm["title"]
+    elif "question" not in norm:
+        norm["question"] = "Research Report"
+    if "answer" not in norm and "report" in norm:
+        norm["answer"] = norm["report"]
+    elif "answer" not in norm:
+        norm["answer"] = ""
+    if "report" not in norm or not isinstance(norm.get("report"), str):
+        norm["report"] = norm["answer"]
+    if "orderedData" not in norm or not isinstance(norm["orderedData"], list):
+        norm["orderedData"] = []
+    if "chatMessages" not in norm or not isinstance(norm["chatMessages"], list):
+        norm["chatMessages"] = []
+    return norm
+
 @app.get("/api/reports")
-async def list_reports():
+async def list_reports(report_ids: Optional[str] = None):
     db = load_reports_db()
-    return {"reports": list(db.values())}
+    id_list = [i.strip() for i in report_ids.split(",") if i.strip()] if report_ids else None
+    res = []
+    for k, v in db.items():
+        if id_list and k not in id_list and v.get("id") not in id_list:
+            continue
+        res.append(_normalize_report(v))
+    # Sort newest first
+    res.sort(key=lambda x: x.get("timestamp", 0), reverse=True)
+    return {"reports": res}
 
 @app.post("/api/reports")
 async def create_report(payload: Dict[str, Any] = Body(...)):
     db = load_reports_db()
     report_id = payload.get("id") or str(uuid.uuid4())
     payload["id"] = report_id
-    if "created_at" not in payload:
-        payload["created_at"] = time.time()
-    db[report_id] = payload
+    norm = _normalize_report(payload)
+    db[report_id] = norm
     save_reports_db(db)
-    return payload
+    return {"report": norm, **norm}
 
 @app.get("/api/reports/{id}")
 async def get_report(id: str):
     db = load_reports_db()
-    if id in db:
-        return db[id]
-    return {"id": id, "report": "", "title": "Research Report", "created_at": time.time()}
+    report_data = db.get(id)
+    if not report_data:
+        for k, v in db.items():
+            if str(k) == str(id) or str(v.get("id")) == str(id):
+                report_data = v
+                break
+    if not report_data:
+        raise HTTPException(status_code=404, detail="Report not found")
+    norm = _normalize_report(report_data)
+    return {"report": norm, **norm}
 
 @app.put("/api/reports/{id}")
 async def update_report(id: str, payload: Dict[str, Any] = Body(...)):
     db = load_reports_db()
-    report_data = db.get(id, {"id": id, "created_at": time.time()})
-    report_data.update(payload)
-    db[id] = report_data
+    existing = db.get(id, {"id": id})
+    existing.update(payload)
+    existing["id"] = id
+    norm = _normalize_report(existing)
+    db[id] = norm
     save_reports_db(db)
-    return report_data
+    return {"report": norm, **norm}
 
 @app.delete("/api/reports/{id}")
 async def delete_report(id: str):
     db = load_reports_db()
+    deleted = False
     if id in db:
         del db[id]
+        deleted = True
+    for k, v in list(db.items()):
+        if str(k) == str(id) or str(v.get("id")) == str(id):
+            del db[k]
+            deleted = True
+    if deleted:
         save_reports_db(db)
     return {"success": True}
 
