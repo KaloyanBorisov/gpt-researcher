@@ -1,0 +1,178 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: gptr-redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  scraper-service:
+    build:
+      context: .
+      dockerfile: services/scraper_service/Dockerfile
+    container_name: gptr-scraper-service
+    environment:
+      - TAVILY_API_KEY=${TAVILY_API_KEY:-}
+      - SCRAPER_PORT=8002
+    ports:
+      - "8002:8002"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  document-service:
+    build:
+      context: .
+      dockerfile: services/document_service/Dockerfile
+    container_name: gptr-document-service
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - DOCUMENT_PORT=8003
+      - DOCS_DIR=/usr/src/app/my-docs
+    volumes:
+      - ./my-docs:/usr/src/app/my-docs:rw
+    ports:
+      - "8003:8003"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  export-service:
+    build:
+      context: .
+      dockerfile: services/export_service/Dockerfile
+    container_name: gptr-export-service
+    environment:
+      - EXPORT_PORT=8004
+      - OUTPUTS_DIR=/usr/src/app/outputs
+    volumes:
+      - ./outputs:/usr/src/app/outputs:rw
+    ports:
+      - "8004:8004"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  research-orchestrator:
+    build:
+      context: .
+      dockerfile: services/research_orchestrator/Dockerfile
+    container_name: gptr-research-orchestrator
+    depends_on:
+      redis:
+        condition: service_healthy
+      scraper-service:
+        condition: service_healthy
+      document-service:
+        condition: service_healthy
+      export-service:
+        condition: service_healthy
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
+      - TAVILY_API_KEY=${TAVILY_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - REDIS_URL=redis://redis:6379/0
+      - SCRAPER_URL=http://scraper-service:8002
+      - DOCUMENT_URL=http://document-service:8003
+      - EXPORT_URL=http://export-service:8004
+      - ORCHESTRATOR_PORT=8001
+    ports:
+      - "8001:8001"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: services/api_gateway/Dockerfile
+    container_name: gptr-api-gateway
+    depends_on:
+      - redis
+      - research-orchestrator
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
+      - REDIS_URL=redis://redis:6379/0
+      - ORCHESTRATOR_URL=http://research-orchestrator:8001
+      - SCRAPER_URL=http://scraper-service:8002
+      - DOCUMENT_URL=http://document-service:8003
+      - EXPORT_URL=http://export-service:8004
+      - GATEWAY_PORT=8000
+      - OUTPUTS_DIR=/usr/src/app/outputs
+      - DOCS_DIR=/usr/src/app/my-docs
+    volumes:
+      - ./outputs:/usr/src/app/outputs:rw
+      - ./my-docs:/usr/src/app/my-docs:rw
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  frontend-nextjs:
+    build:
+      context: frontend/nextjs
+      dockerfile: Dockerfile.dev
+    container_name: gptr-frontend-nextjs
+    depends_on:
+      - api-gateway
+    environment:
+      - NEXT_PUBLIC_GPTR_API_URL=http://localhost:8000
+      - CHOKIDAR_USEPOLLING=true
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend/nextjs:/app
+      - /app/node_modules
+      - /app/.next
+      - ./outputs:/app/outputs
+    restart: unless-stopped
+
+  # Container composition test runner
+  test-runner:
+    build:
+      context: .
+      dockerfile: tests/Dockerfile.test
+    container_name: gptr-test-runner
+    profiles: ["test"]
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+      research-orchestrator:
+        condition: service_healthy
+      scraper-service:
+        condition: service_healthy
+      document-service:
+        condition: service_healthy
+      export-service:
+        condition: service_healthy
+    environment:
+      - GATEWAY_URL=http://api-gateway:8000
+      - ORCHESTRATOR_URL=http://research-orchestrator:8001
+      - SCRAPER_URL=http://scraper-service:8002
+      - DOCUMENT_URL=http://document-service:8003
+      - EXPORT_URL=http://export-service:8004
+    command: ["pytest", "tests/test_microservices_container.py", "tests/test_microservices.py", "-v"]
