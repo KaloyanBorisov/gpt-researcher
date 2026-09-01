@@ -10,6 +10,10 @@ class ServiceSettings(BaseSettings):
     SCRAPER_URL: str = os.getenv("SCRAPER_URL", "http://scraper-service:8002")
     DOCUMENT_URL: str = os.getenv("DOCUMENT_URL", "http://document-service:8003")
     EXPORT_URL: str = os.getenv("EXPORT_URL", "http://export-service:8004")
+    PLANNING_URL: str = os.getenv("PLANNING_URL", "http://planning-service:8011")
+    SECTION_RESEARCH_URL: str = os.getenv("SECTION_RESEARCH_URL", "http://section-research-service:8012")
+    REVIEWER_URL: str = os.getenv("REVIEWER_URL", "http://reviewer-service:8013")
+    WRITER_URL: str = os.getenv("WRITER_URL", "http://writer-service:8014")
 
     # Redis message broker & Pub/Sub
     REDIS_URL: str = os.getenv("REDIS_URL", "redis://redis:6379/0")

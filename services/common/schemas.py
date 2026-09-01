@@ -113,3 +113,65 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     report: str
     messages: List[ChatMessage]
+
+# =============================================================================
+# Decomposed Agent Microservice Schemas
+# =============================================================================
+
+class SubtopicPlan(BaseModel):
+    title: str
+    subqueries: List[str] = []
+    description: Optional[str] = ""
+
+class PlanRequest(BaseModel):
+    task: str = Field(..., description="Main research task/question")
+    report_type: str = Field(default="research_report")
+    tone: str = Field(default="Objective")
+    max_subtopics: Optional[int] = 5
+
+class PlanResponse(BaseModel):
+    task: str
+    outline: List[str] = []
+    subtopics: List[SubtopicPlan] = []
+    initial_summary: Optional[str] = ""
+
+class SectionResearchRequest(BaseModel):
+    task: str
+    subtopic: str
+    subqueries: List[str] = []
+    report_source: str = "web"
+    tone: str = "Objective"
+    max_results_per_query: Optional[int] = 4
+
+class SectionResearchResponse(BaseModel):
+    subtopic: str
+    context: str
+    sources: List[str] = []
+    draft_content: Optional[str] = ""
+
+class ReviewRequest(BaseModel):
+    task: str
+    subtopic: Optional[str] = None
+    content: str
+    sources: List[str] = []
+    guidelines: Optional[str] = None
+
+class ReviewResponse(BaseModel):
+    score: float = 1.0
+    passed: bool = True
+    feedback: str = "Looks good"
+    revision_suggestions: List[str] = []
+
+class SynthesisRequest(BaseModel):
+    task: str
+    report_type: str = "research_report"
+    tone: str = "Objective"
+    outline: List[str] = []
+    sections: List[Dict[str, Any]] = []
+    sources: List[str] = []
+
+class SynthesisResponse(BaseModel):
+    report_markdown: str
+    total_words: int = 0
+    sources_used: List[str] = []
+
