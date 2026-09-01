@@ -35,6 +35,8 @@ services:
     container_name: gptr-document-service
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-}
       - DOCUMENT_PORT=8003
       - DOCS_DIR=/usr/src/app/my-docs
     volumes:
@@ -84,6 +86,12 @@ services:
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-}
+      - FAST_LLM=${FAST_LLM:-}
+      - SMART_LLM=${SMART_LLM:-}
+      - STRATEGIC_LLM=${STRATEGIC_LLM:-}
+      - EMBEDDING=${EMBEDDING:-}
       - TAVILY_API_KEY=${TAVILY_API_KEY:-}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
@@ -112,6 +120,12 @@ services:
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-}
+      - FAST_LLM=${FAST_LLM:-}
+      - SMART_LLM=${SMART_LLM:-}
+      - STRATEGIC_LLM=${STRATEGIC_LLM:-}
+      - EMBEDDING=${EMBEDDING:-}
       - REDIS_URL=redis://redis:6379/0
       - ORCHESTRATOR_URL=http://research-orchestrator:8001
       - SCRAPER_URL=http://scraper-service:8002

@@ -70,12 +70,14 @@ class Config:
         """
         for key, value in config.items():
             env_value = os.getenv(key)
-            if env_value is not None:
+            if env_value is not None and env_value.strip() != "":
                 value = self.convert_env_value(key, env_value, BaseConfig.__annotations__[key])
             setattr(self, key.lower(), value)
 
         # Handle RETRIEVER with default value
-        retriever_env = os.environ.get("RETRIEVER", config.get("RETRIEVER", "tavily"))
+        retriever_env = os.environ.get("RETRIEVER") or config.get("RETRIEVER", "tavily")
+        if not retriever_env or not retriever_env.strip():
+            retriever_env = "tavily"
         try:
             self.retrievers = self.parse_retrievers(retriever_env)
         except ValueError as e:
@@ -84,16 +86,49 @@ class Config:
 
     def _set_embedding_attributes(self) -> None:
         """Parse and set embedding provider and model attributes."""
+        if not getattr(self, "embedding", None) or not str(self.embedding).strip():
+            self.embedding = DEFAULT_CONFIG["EMBEDDING"]
         self.embedding_provider, self.embedding_model = self.parse_embedding(
             self.embedding
         )
+        # OpenRouter fallback for embedding if OpenAI key is absent
+        has_openai_key = bool(os.getenv("OPENAI_API_KEY", "").strip())
+        has_openrouter_key = bool(os.getenv("OPENROUTER_API_KEY", "").strip())
+        if not has_openai_key and has_openrouter_key and self.embedding_provider == "openai":
+            self.embedding_provider = "openrouter"
+            if self.embedding_model and "/" not in self.embedding_model:
+                self.embedding_model = f"openai/{self.embedding_model}"
 
     def _set_llm_attributes(self) -> None:
         """Parse and set LLM provider and model attributes for all LLM types."""
+        if not getattr(self, "fast_llm", None) or not str(self.fast_llm).strip():
+            self.fast_llm = DEFAULT_CONFIG["FAST_LLM"]
+        if not getattr(self, "smart_llm", None) or not str(self.smart_llm).strip():
+            self.smart_llm = DEFAULT_CONFIG["SMART_LLM"]
+        if not getattr(self, "strategic_llm", None) or not str(self.strategic_llm).strip():
+            self.strategic_llm = DEFAULT_CONFIG["STRATEGIC_LLM"]
+
         self.fast_llm_provider, self.fast_llm_model = self.parse_llm(self.fast_llm)
         self.smart_llm_provider, self.smart_llm_model = self.parse_llm(self.smart_llm)
         self.strategic_llm_provider, self.strategic_llm_model = self.parse_llm(self.strategic_llm)
         self.reasoning_effort = self.parse_reasoning_effort(os.getenv("REASONING_EFFORT"))
+
+        # OpenRouter fallback / alternative: if OPENAI_API_KEY is absent but OPENROUTER_API_KEY is present
+        has_openai_key = bool(os.getenv("OPENAI_API_KEY", "").strip())
+        has_openrouter_key = bool(os.getenv("OPENROUTER_API_KEY", "").strip())
+        if not has_openai_key and has_openrouter_key:
+            if self.fast_llm_provider == "openai":
+                self.fast_llm_provider = "openrouter"
+                if self.fast_llm_model and "/" not in self.fast_llm_model:
+                    self.fast_llm_model = f"openai/{self.fast_llm_model}"
+            if self.smart_llm_provider == "openai":
+                self.smart_llm_provider = "openrouter"
+                if self.smart_llm_model and "/" not in self.smart_llm_model:
+                    self.smart_llm_model = f"openai/{self.smart_llm_model}"
+            if self.strategic_llm_provider == "openai":
+                self.strategic_llm_provider = "openrouter"
+                if self.strategic_llm_model and "/" not in self.strategic_llm_model:
+                    self.strategic_llm_model = f"openai/{self.strategic_llm_model}"
 
     def _handle_deprecated_attributes(self) -> None:
         """Handle deprecated configuration attributes with warnings."""
@@ -205,7 +240,7 @@ class Config:
         """Parse llm string into (llm_provider, llm_model)."""
         from gpt_researcher.llm_provider.generic.base import _SUPPORTED_PROVIDERS
 
-        if llm_str is None:
+        if not llm_str or not str(llm_str).strip():
             return None, None
         try:
             llm_provider, llm_model = llm_str.split(":", 1)
@@ -234,7 +269,7 @@ class Config:
         """Parse embedding string into (embedding_provider, embedding_model)."""
         from gpt_researcher.memory.embeddings import _SUPPORTED_PROVIDERS
 
-        if embedding_str is None:
+        if not embedding_str or not str(embedding_str).strip():
             return None, None
         try:
             embedding_provider, embedding_model = embedding_str.split(":", 1)

@@ -211,22 +211,49 @@ class GenericLLMProvider:
         elif provider == "openrouter":
             _check_pkg("langchain_openai")
             from langchain_openai import ChatOpenAI
-            from langchain_core.rate_limiters import InMemoryRateLimiter
 
-            rps = float(os.environ["OPENROUTER_LIMIT_RPS"]) if "OPENROUTER_LIMIT_RPS" in os.environ else 1.0
+            api_base = os.environ.get("OPENROUTER_BASE_URL") or os.environ.get("OPENROUTER_API_BASE") or "https://openrouter.ai/api/v1"
+            api_key = kwargs.pop("openai_api_key", None) or os.environ.get("OPENROUTER_API_KEY")
 
-            rate_limiter = InMemoryRateLimiter(
-                requests_per_second=rps,
-                check_every_n_seconds=0.1,
-                max_bucket_size=10,
-            )
+            # OpenRouter expects provider/model format (e.g. openai/gpt-4o-mini, anthropic/claude-3.5-sonnet)
+            model_name = kwargs.get("model")
+            if model_name and "/" not in model_name:
+                if model_name.startswith("claude"):
+                    kwargs["model"] = f"anthropic/{model_name}"
+                elif model_name.startswith("mistral") or model_name.startswith("mixtral"):
+                    kwargs["model"] = f"mistralai/{model_name}"
+                elif model_name.startswith("gemini"):
+                    kwargs["model"] = f"google/{model_name}"
+                elif model_name.startswith("deepseek"):
+                    kwargs["model"] = f"deepseek/{model_name}"
+                else:
+                    kwargs["model"] = f"openai/{model_name}"
 
-            llm = ChatOpenAI(openai_api_base='https://openrouter.ai/api/v1',
-                     request_timeout=180,
-                     openai_api_key=os.environ["OPENROUTER_API_KEY"],
-                     rate_limiter=rate_limiter,
-                     **kwargs
+            # OpenRouter metadata headers
+            default_headers = kwargs.pop("default_headers", None) or {}
+            if "HTTP-Referer" not in default_headers:
+                default_headers["HTTP-Referer"] = os.environ.get("OPENROUTER_HTTP_REFERER", "https://gptr.dev")
+            if "X-Title" not in default_headers:
+                default_headers["X-Title"] = os.environ.get("OPENROUTER_TITLE", "GPT-Researcher")
+
+            openrouter_kwargs = {
+                "openai_api_base": api_base,
+                "openai_api_key": api_key,
+                "request_timeout": kwargs.pop("request_timeout", 180),
+                "default_headers": default_headers,
+                **kwargs,
+            }
+
+            if "OPENROUTER_LIMIT_RPS" in os.environ:
+                from langchain_core.rate_limiters import InMemoryRateLimiter
+                rps = float(os.environ["OPENROUTER_LIMIT_RPS"])
+                openrouter_kwargs["rate_limiter"] = InMemoryRateLimiter(
+                    requests_per_second=rps,
+                    check_every_n_seconds=0.1,
+                    max_bucket_size=10,
                 )
+
+            llm = ChatOpenAI(**openrouter_kwargs)
         elif provider == "vllm_openai":
             _check_pkg("langchain_openai")
             from langchain_openai import ChatOpenAI

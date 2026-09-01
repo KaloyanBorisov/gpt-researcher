@@ -195,10 +195,14 @@ class Memory:
             case "openrouter":
                 from langchain_openai import OpenAIEmbeddings
 
+                model_name = model
+                if model_name and "/" not in model_name:
+                    model_name = f"openai/{model_name}"
+
                 _embeddings = OpenAIEmbeddings(
-                    model=model,
+                    model=model_name,
                     openai_api_key=os.getenv("OPENROUTER_API_KEY"),
-                    openai_api_base="https://openrouter.ai/api/v1",
+                    openai_api_base=os.getenv("OPENROUTER_BASE_URL") or os.getenv("OPENROUTER_API_BASE") or "https://openrouter.ai/api/v1",
                     **embedding_kwargs,
                 )
             case _:

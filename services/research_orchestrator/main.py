@@ -11,8 +11,8 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../.
 from services.common.schemas import ResearchRequest
 from services.research_orchestrator.orchestrator import orchestrator
 
-# Clean up empty env strings so SDKs (OpenAI, Anthropic, Tavily, etc.) don't attempt to use empty strings as URLs
-for env_k in ["OPENAI_BASE_URL", "OPENAI_API_BASE", "GOOGLE_API_KEY", "ANTHROPIC_API_KEY"]:
+# Clean up empty env strings so SDKs (OpenAI, OpenRouter, Anthropic, Tavily, etc.) don't attempt to use empty strings as URLs
+for env_k in ["OPENAI_BASE_URL", "OPENAI_API_BASE", "OPENROUTER_BASE_URL", "OPENROUTER_API_BASE", "OPENROUTER_API_KEY", "GOOGLE_API_KEY", "ANTHROPIC_API_KEY"]:
     if env_k in os.environ and not os.environ[env_k].strip():
         del os.environ[env_k]
 

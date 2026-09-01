@@ -37,7 +37,7 @@ class ResearchOrchestrator:
 
         try:
             # Clean up empty env strings so OpenAIEmbeddings and other SDKs don't use empty strings as base URLs
-            for env_k in ["OPENAI_BASE_URL", "OPENAI_API_BASE", "GOOGLE_API_KEY", "ANTHROPIC_API_KEY"]:
+            for env_k in ["OPENAI_BASE_URL", "OPENAI_API_BASE", "OPENROUTER_BASE_URL", "OPENROUTER_API_BASE", "OPENROUTER_API_KEY", "GOOGLE_API_KEY", "ANTHROPIC_API_KEY"]:
                 if env_k in os.environ and not os.environ[env_k].strip():
                     del os.environ[env_k]
 

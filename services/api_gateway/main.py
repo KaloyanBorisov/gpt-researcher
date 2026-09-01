@@ -275,18 +275,53 @@ async def post_report_chat(id: str, payload: Dict[str, Any] = Body(...)):
     
     ai_response = "Thank you for your question regarding this report."
     report_text = report.get("report", "")
-    if settings.OPENAI_API_KEY and report_text:
+    openai_key = (os.getenv("OPENAI_API_KEY") or settings.OPENAI_API_KEY or "").strip()
+    openrouter_key = (os.getenv("OPENROUTER_API_KEY") or settings.OPENROUTER_API_KEY or "").strip()
+
+    if report_text and (openai_key or openrouter_key):
         try:
-            from openai import AsyncOpenAI
-            client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
-            comp = await client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": f"You are a helpful assistant answering questions about the following research report:\n\n{report_text[:4000]}"},
-                    {"role": "user", "content": message}
-                ]
-            )
-            ai_response = comp.choices[0].message.content or ai_response
+            chat_prompts = [
+                {"role": "system", "content": f"You are a helpful assistant answering questions about the following research report:\n\n{report_text[:4000]}"},
+                {"role": "user", "content": message}
+            ]
+            if openai_key:
+                api_url = f"{os.getenv('OPENAI_BASE_URL', 'https://api.openai.com/v1').rstrip('/')}/chat/completions"
+                headers = {
+                    "Authorization": f"Bearer {openai_key}",
+                    "Content-Type": "application/json"
+                }
+                fast_cfg = os.getenv("FAST_LLM", "")
+                model_name = fast_cfg.split(":", 1)[1] if ":" in fast_cfg else (fast_cfg or "gpt-4o-mini")
+            else:
+                base_url = (os.getenv("OPENROUTER_BASE_URL") or settings.OPENROUTER_BASE_URL or "https://openrouter.ai/api/v1").rstrip("/")
+                api_url = f"{base_url}/chat/completions"
+                headers = {
+                    "Authorization": f"Bearer {openrouter_key}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": os.getenv("OPENROUTER_HTTP_REFERER", "https://gptr.dev"),
+                    "X-Title": os.getenv("OPENROUTER_TITLE", "GPT-Researcher")
+                }
+                fast_cfg = os.getenv("FAST_LLM") or os.getenv("SMART_LLM") or "openai/gpt-4o-mini"
+                model_name = fast_cfg.split(":", 1)[1] if ":" in fast_cfg else fast_cfg
+                if model_name and "/" not in model_name:
+                    model_name = f"openai/{model_name}"
+
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                res = await client.post(
+                    api_url,
+                    headers=headers,
+                    json={
+                        "model": model_name,
+                        "messages": chat_prompts,
+                        "temperature": 0.4
+                    }
+                )
+                if res.status_code == 200:
+                    data = res.json()
+                    ai_response = data["choices"][0]["message"]["content"]
+                else:
+                    logger.error(f"Chat completion error ({res.status_code}): {res.text}")
+                    ai_response = f"Error generating answer: {res.text}"
         except Exception as chat_err:
             logger.warning(f"Error generating chat answer: {chat_err}")
     
@@ -307,10 +342,11 @@ async def general_chat(payload: Dict[str, Any] = Body(...)):
             user_message = msg.get("content", "")
             break
             
-    openai_key = os.getenv("OPENAI_API_KEY") or settings.OPENAI_API_KEY
+    openai_key = (os.getenv("OPENAI_API_KEY") or settings.OPENAI_API_KEY or "").strip()
+    openrouter_key = (os.getenv("OPENROUTER_API_KEY") or settings.OPENROUTER_API_KEY or "").strip()
     ai_answer = ""
     
-    if openai_key and user_message:
+    if (openai_key or openrouter_key) and user_message:
         try:
             chat_prompts = [
                 {
@@ -327,15 +363,34 @@ async def general_chat(payload: Dict[str, Any] = Body(...)):
             
             chat_prompts.append({"role": "user", "content": user_message})
             
+            if openai_key:
+                api_url = f"{os.getenv('OPENAI_BASE_URL', 'https://api.openai.com/v1').rstrip('/')}/chat/completions"
+                headers = {
+                    "Authorization": f"Bearer {openai_key}",
+                    "Content-Type": "application/json"
+                }
+                fast_cfg = os.getenv("FAST_LLM", "")
+                model_name = fast_cfg.split(":", 1)[1] if ":" in fast_cfg else (fast_cfg or "gpt-4o-mini")
+            else:
+                base_url = (os.getenv("OPENROUTER_BASE_URL") or settings.OPENROUTER_BASE_URL or "https://openrouter.ai/api/v1").rstrip("/")
+                api_url = f"{base_url}/chat/completions"
+                headers = {
+                    "Authorization": f"Bearer {openrouter_key}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": os.getenv("OPENROUTER_HTTP_REFERER", "https://gptr.dev"),
+                    "X-Title": os.getenv("OPENROUTER_TITLE", "GPT-Researcher")
+                }
+                fast_cfg = os.getenv("FAST_LLM") or os.getenv("SMART_LLM") or "openai/gpt-4o-mini"
+                model_name = fast_cfg.split(":", 1)[1] if ":" in fast_cfg else fast_cfg
+                if model_name and "/" not in model_name:
+                    model_name = f"openai/{model_name}"
+
             async with httpx.AsyncClient(timeout=30.0) as client:
                 res = await client.post(
-                    "https://api.openai.com/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {openai_key.strip()}",
-                        "Content-Type": "application/json"
-                    },
+                    api_url,
+                    headers=headers,
                     json={
-                        "model": "gpt-4o-mini",
+                        "model": model_name,
                         "messages": chat_prompts,
                         "temperature": 0.4
                     }
@@ -344,13 +399,13 @@ async def general_chat(payload: Dict[str, Any] = Body(...)):
                     data = res.json()
                     ai_answer = data["choices"][0]["message"]["content"]
                 else:
-                    logger.error(f"OpenAI chat response error: {res.status_code} - {res.text}")
-                    ai_answer = f"Error from OpenAI: {res.text}"
+                    logger.error(f"Chat response error: {res.status_code} - {res.text}")
+                    ai_answer = f"Error from LLM provider: {res.text}"
         except Exception as e:
             logger.error(f"Error in /api/chat endpoint: {e}", exc_info=True)
             ai_answer = f"Error generating answer: {str(e)}"
-    elif not openai_key:
-        ai_answer = "Please configure your OPENAI_API_KEY in .env to enable interactive chat on research reports."
+    elif not openai_key and not openrouter_key:
+        ai_answer = "Please configure your OPENAI_API_KEY or OPENROUTER_API_KEY in .env to enable interactive chat on research reports."
     else:
         ai_answer = "I'm ready to answer any questions about your report. What would you like to know?"
             
