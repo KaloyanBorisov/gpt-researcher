@@ -11,7 +11,6 @@ COPY services/research_orchestrator/requirements.txt ./service_req.txt
 RUN pip install --no-cache-dir -r requirements.txt -r service_req.txt
 
 COPY gpt_researcher ./gpt_researcher
-COPY multi_agents ./multi_agents
 COPY services ./services
 
 ENV PYTHONUNBUFFERED=1
