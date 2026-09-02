@@ -19,9 +19,11 @@ export const getHost = ({ purpose }: GetHostParams = {}): string => {
     } else if (process.env.REACT_APP_GPTR_API_URL) {
       return process.env.REACT_APP_GPTR_API_URL;
     } else if (purpose === 'langgraph-gui') {
-      return host.includes('localhost') ? 'http%3A%2F%2F127.0.0.1%3A8123' : `https://${host}`;
+      return (host.includes('localhost') || host.includes('127.0.0.1')) ? 'http%3A%2F%2F127.0.0.1%3A8123' : `${window.location.protocol}//${window.location.hostname}:8123`;
     } else {
-      return host.includes('localhost') ? 'http://localhost:8000' : `https://${host}`;
+      const proto = window.location.protocol.startsWith('https') ? 'https:' : 'http:';
+      const hostname = window.location.hostname || 'localhost';
+      return `${proto}//${hostname}:8000`;
     }
   }
   return '';
