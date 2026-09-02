@@ -46,6 +46,28 @@ class WorkflowCoordinator:
             }
             await event_bus.publish(channel, payload)
 
+        root_run = None
+        parent_run_id = None
+        if os.getenv("LANGCHAIN_TRACING_V2") == "true" or os.getenv("LANGSMITH_TRACING") == "true":
+            try:
+                from langsmith.run_trees import RunTree
+                root_run = RunTree(
+                    name=f"Research Workflow: {request.task[:60]}",
+                    run_type="chain",
+                    inputs={
+                        "task": request.task,
+                        "report_type": request.report_type,
+                        "tone": request.tone,
+                        "session_id": session_id
+                    },
+                    project_name=os.getenv("LANGSMITH_PROJECT", "gpt-researcher")
+                )
+                root_run.post()
+                parent_run_id = str(root_run.id)
+                logger.info(f"Initialized LangSmith root trace: {parent_run_id}")
+            except Exception as tr_err:
+                logger.warning(f"Failed to create LangSmith root run: {tr_err}")
+
         try:
             # Clean up empty env strings
             for env_k in ["OPENAI_BASE_URL", "OPENAI_API_BASE", "OPENROUTER_BASE_URL", "OPENROUTER_API_BASE", "OPENROUTER_API_KEY", "GOOGLE_API_KEY", "ANTHROPIC_API_KEY"]:
@@ -76,7 +98,8 @@ class WorkflowCoordinator:
                         "task": request.task,
                         "report_type": request.report_type,
                         "tone": request.tone,
-                        "max_subtopics": max_subtopics
+                        "max_subtopics": max_subtopics,
+                        "parent_run_id": parent_run_id
                     }
                 )
                 
@@ -127,7 +150,8 @@ class WorkflowCoordinator:
                                 "subqueries": queries,
                                 "report_source": request.report_source,
                                 "tone": request.tone,
-                                "max_results_per_query": 3
+                                "max_results_per_query": 3,
+                                "parent_run_id": parent_run_id
                             }
                         )
                         if res.status_code == 200:
@@ -174,7 +198,8 @@ class WorkflowCoordinator:
                             json={
                                 "task": request.task,
                                 "content": "\n\n".join([s.get("draft_content", "") for s in sections]),
-                                "sources": all_sources
+                                "sources": all_sources,
+                                "parent_run_id": parent_run_id
                             }
                         )
                         if review_res.status_code == 200:
@@ -197,7 +222,8 @@ class WorkflowCoordinator:
                             "tone": request.tone,
                             "outline": outline,
                             "sections": sections,
-                            "sources": all_sources
+                            "sources": all_sources,
+                            "parent_run_id": parent_run_id
                         }
                     )
                     if synth_res.status_code == 200:
@@ -232,7 +258,7 @@ class WorkflowCoordinator:
                         paths[fmt_key] = download_url
 
                 # -------------------------------------------------------------
-                # 6. Publish Final Output
+                # 6. Publish Final Output & End Root Trace
                 # -------------------------------------------------------------
                 await event_bus.publish(channel, {
                     "type": "report",
@@ -253,16 +279,29 @@ class WorkflowCoordinator:
                     output="🎉 Research report successfully synthesized and exported!"
                 )
 
+                if root_run:
+                    root_run.end(outputs={
+                        "report_length": len(report),
+                        "sources_count": len(all_sources),
+                        "sections_count": len(sections),
+                        "paths": paths
+                    })
+                    root_run.patch()
+
                 return {
                     "session_id": session_id,
                     "status": "completed",
                     "report": report,
                     "sources": all_sources,
-                    "paths": paths
+                    "paths": paths,
+                    "trace_id": parent_run_id
                 }
 
         except Exception as e:
             logger.error(f"Error during distributed research execution for {session_id}: {e}", exc_info=True)
+            if root_run:
+                root_run.end(error=str(e))
+                root_run.patch()
             await websocket_event_emitter("error", content="error", output=f"Research failed: {str(e)}")
             return {
                 "session_id": session_id,

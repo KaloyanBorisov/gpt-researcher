@@ -1,7 +1,7 @@
 import os
 import sys
 import logging
-from typing import Dict, Any, List
+from typing import List, Dict, Any
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
@@ -12,65 +12,84 @@ from gpt_researcher.config import Config
 logger = logging.getLogger("writer_service")
 
 class ReportWriter:
-    """Specialized agent service for synthesizing researched sections into publication-ready reports."""
+    """Specialized agent service for synthesizing structured section drafts into a comprehensive research report."""
 
     async def synthesize_report(self, request: SynthesisRequest) -> SynthesisResponse:
-        logger.info(f"Synthesizing report for task '{request.task}' with {len(request.sections)} sections")
+        logger.info(f"Synthesizing final research report for task: '{request.task}'")
         cfg = Config()
 
-        # Compile body content from sections
-        section_texts = []
-        all_sources: List[str] = list(request.sources)
-        for s in request.sections:
-            title = s.get("subtopic", "Section")
-            draft = s.get("draft_content", "")
-            sources = s.get("sources", [])
-            for src in sources:
-                if src and src not in all_sources:
-                    all_sources.append(src)
-            section_texts.append(f"## {title}\n\n{draft}")
+        child_run = None
+        callbacks = []
+        if request.parent_run_id and (os.getenv("LANGCHAIN_TRACING_V2") == "true" or os.getenv("LANGSMITH_TRACING") == "true"):
+            try:
+                from langsmith.run_trees import RunTree
+                child_run = RunTree(
+                    name="Writer Agent (Synthesis)",
+                    run_type="chain",
+                    parent_run_id=request.parent_run_id,
+                    inputs={"task": request.task, "report_type": request.report_type, "sections_count": len(request.sections)},
+                    project_name=os.getenv("LANGSMITH_PROJECT", "gpt-researcher")
+                )
+                child_run.post()
+                callbacks = [child_run.get_langchain_callback()]
+            except Exception as tr_err:
+                logger.warning(f"Failed to create child RunTree for writer: {tr_err}")
 
-        combined_body = "\n\n".join(section_texts)
+        # Assemble section drafts
+        sections_text = ""
+        for i, s in enumerate(request.sections, start=1):
+            subtopic = s.get("subtopic", f"Section {i}")
+            content = s.get("draft_content", "")
+            sections_text += f"\n\n## {subtopic}\n{content}"
+
+        sources_formatted = "\n".join([f"- {src}" for src in request.sources if src])
 
         prompt = (
-            f"You are a chief technical writer and editor. Synthesize the following section drafts into a polished, "
-            f"coherent, and publication-ready research report.\n\n"
-            f"Report Title / Task: \"{request.task}\"\n"
-            f"Tone: {request.tone}\n"
-            f"Report Type: {request.report_type}\n\n"
-            f"Drafted Section Content:\n"
-            f"{combined_body[:10000]}\n\n"
+            f"You are an expert research editor and synthesis author.\n"
+            f"Task: \"{request.task}\"\n"
+            f"Tone: {request.tone}\n\n"
+            f"Here are the researched draft sections:\n"
+            f"{sections_text}\n\n"
+            f"Sources gathered:\n{sources_formatted}\n\n"
             f"Instructions:\n"
-            f"1. Write a compelling `# {request.task}` main title and Executive Summary / Introduction.\n"
-            f"2. Integrate the section drafts smoothly with clean transitions, headings (`##`, `###`), and markdown tables if relevant.\n"
-            f"3. Write a thorough Conclusion and Key Takeaways section.\n"
-            f"4. Add a `## References` section at the end listing the cited sources.\n"
-            f"Do not include meta-commentary, output only the clean markdown report."
+            f"1. Write a cohesive, comprehensive, high-quality Markdown research report starting with a # Title.\n"
+            f"2. Add an Executive Summary at the beginning.\n"
+            f"3. Integrate all section contents smoothly without redundant section duplication.\n"
+            f"4. Add a Conclusion / Strategic Outlook section.\n"
+            f"5. End with a ## References section listing all unique source links in markdown format.\n"
+            f"Do not include meta-commentary, output ONLY the complete markdown report."
         )
 
         messages = [
-            {"role": "system", "content": "You are a master technical writer synthesizing a comprehensive report."},
+            {"role": "system", "content": "You are a senior research editor. Write comprehensive, publication-ready research reports."},
             {"role": "user", "content": prompt}
         ]
 
         try:
-            final_report = await create_chat_completion(
+            report_md = await create_chat_completion(
                 messages=messages,
                 model=cfg.smart_llm_model,
                 llm_provider=cfg.smart_llm_provider,
                 temperature=0.35,
-                max_tokens=4500
+                max_tokens=4000,
+                callbacks=callbacks
             )
-        except Exception as e:
-            logger.error(f"Error synthesizing report with LLM: {e}. Falling back to assembled sections.")
-            final_report = f"# {request.task}\n\n{combined_body}\n\n## References\n\n" + "\n".join([f"- {src}" for src in all_sources[:15]])
+        except Exception as err:
+            logger.error(f"Error during final report synthesis: {err}")
+            # Fallback direct markdown assembly
+            report_md = f"# {request.task}\n\n{sections_text}\n\n## References\n{sources_formatted}"
 
-        word_count = len(final_report.split())
-
-        return SynthesisResponse(
-            report_markdown=final_report,
+        word_count = len(report_md.split())
+        response = SynthesisResponse(
+            report_markdown=report_md,
             total_words=word_count,
-            sources_used=all_sources
+            sources_used=request.sources
         )
+
+        if child_run:
+            child_run.end(outputs={"total_words": word_count, "sources_count": len(request.sources)})
+            child_run.patch()
+
+        return response
 
 writer = ReportWriter()

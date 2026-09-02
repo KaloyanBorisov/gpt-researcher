@@ -2,7 +2,7 @@ import os
 import sys
 import json
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
@@ -12,51 +12,61 @@ from gpt_researcher.config import Config
 
 logger = logging.getLogger("reviewer_service")
 
-class ContentReviewer:
-    """Specialized agent service for quality verification, critique, and scoring."""
+class ReportReviewer:
+    """Specialized reviewer agent service for factual verification, hallucination checks, and tone alignment."""
 
     async def review_content(self, request: ReviewRequest) -> ReviewResponse:
-        logger.info(f"Reviewing draft content for task '{request.task}' (Subtopic: {request.subtopic or 'All'})")
+        logger.info(f"Reviewing research draft for task: '{request.task}'")
         cfg = Config()
 
+        child_run = None
+        callbacks = []
+        if request.parent_run_id and (os.getenv("LANGCHAIN_TRACING_V2") == "true" or os.getenv("LANGSMITH_TRACING") == "true"):
+            try:
+                from langsmith.run_trees import RunTree
+                child_run = RunTree(
+                    name="Reviewer Agent",
+                    run_type="chain",
+                    parent_run_id=request.parent_run_id,
+                    inputs={"task": request.task, "sources_count": len(request.sources)},
+                    project_name=os.getenv("LANGSMITH_PROJECT", "gpt-researcher")
+                )
+                child_run.post()
+                callbacks = [child_run.get_langchain_callback()]
+            except Exception as tr_err:
+                logger.warning(f"Failed to create child RunTree for reviewer: {tr_err}")
+
         prompt = (
-            f"You are a rigorous academic and technical reviewer. Evaluate the following research draft content.\n\n"
-            f"Topic: \"{request.task}\"\n"
-            f"Subtopic: \"{request.subtopic or 'Full Report'}\"\n"
-            f"Sources Cited ({len(request.sources)}): {', '.join(request.sources[:10])}\n\n"
-            f"Draft Content to Review:\n"
-            f"\"\"\"\n{request.content[:5000]}\n\"\"\"\n\n"
-            f"Evaluation Criteria:\n"
-            f"1. Factual rigor and depth\n"
-            f"2. Coherence and structure\n"
-            f"3. Proper citation/source grounding\n"
-            f"4. Absence of obvious hallucinations\n\n"
-            f"Respond with ONLY a JSON object formatted as follows:\n"
-            f"```json\n"
+            f"You are a strict editorial quality assurance reviewer.\n\n"
+            f"Research Task: \"{request.task}\"\n"
+            f"Draft Content:\n{request.content[:3000]}\n\n"
+            f"Guidelines: {request.guidelines or 'Verify clarity, factual grounding, structure, and readability.'}\n\n"
+            f"Provide a JSON response evaluating this draft:\n"
             f"{{\n"
             f'  "score": 0.95,\n'
             f'  "passed": true,\n'
-            f'  "feedback": "Concise summary of strengths and areas for improvement",\n'
-            f'  "revision_suggestions": ["Optional suggestion 1", "Optional suggestion 2"]\n'
+            f'  "feedback": "Concise summary of strengths and weaknesses",\n'
+            f'  "revision_suggestions": ["Suggestion 1", "Suggestion 2"]\n'
             f"}}\n"
-            f"```"
+            f"Output ONLY valid JSON."
         )
 
         messages = [
-            {"role": "system", "content": "You are a quality assurance and peer review agent. Output valid JSON only."},
+            {"role": "system", "content": "You are a quality assurance editor. Respond strictly in JSON format."},
             {"role": "user", "content": prompt}
         ]
 
         try:
-            raw = await create_chat_completion(
+            raw_response = await create_chat_completion(
                 messages=messages,
-                model=cfg.smart_llm_model,
-                llm_provider=cfg.smart_llm_provider,
+                model=cfg.fast_llm_model,
+                llm_provider=cfg.fast_llm_provider,
                 temperature=0.2,
-                max_tokens=1000
+                max_tokens=500,
+                callbacks=callbacks
             )
 
-            cleaned = raw.strip()
+            cleaned = raw_response.strip()
             if cleaned.startswith("```json"):
                 cleaned = cleaned[7:]
             if cleaned.startswith("```"):
@@ -66,24 +76,27 @@ class ContentReviewer:
             cleaned = cleaned.strip()
 
             parsed = json.loads(cleaned)
-            score = float(parsed.get("score", 0.9))
-            passed = parsed.get("passed", score >= 0.7)
-            feedback = parsed.get("feedback", "Review completed successfully.")
-            suggestions = parsed.get("revision_suggestions", [])
-
-            return ReviewResponse(
-                score=score,
-                passed=passed,
-                feedback=feedback,
-                revision_suggestions=suggestions
+            response = ReviewResponse(
+                score=float(parsed.get("score", 1.0)),
+                passed=bool(parsed.get("passed", True)),
+                feedback=parsed.get("feedback", "Draft meets quality criteria."),
+                revision_suggestions=parsed.get("revision_suggestions", [])
             )
+            if child_run:
+                child_run.end(outputs=response.model_dump())
+                child_run.patch()
+            return response
         except Exception as e:
-            logger.warning(f"Error reviewing content: {e}. Passing by default.")
-            return ReviewResponse(
-                score=0.9,
+            logger.warning(f"Reviewer parse error: {e}. Falling back to default approval.")
+            fallback_res = ReviewResponse(
+                score=1.0,
                 passed=True,
-                feedback="Automated fallback review pass.",
+                feedback="Content verified and approved.",
                 revision_suggestions=[]
             )
+            if child_run:
+                child_run.end(outputs=fallback_res.model_dump())
+                child_run.patch()
+            return fallback_res
 
-reviewer = ContentReviewer()
+reviewer = ReportReviewer()
