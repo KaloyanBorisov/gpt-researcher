@@ -51,42 +51,59 @@ npx skills add assafelovic/gpt-researcher
 
 Once installed, Claude can leverage GPT Researcher's deep research capabilities directly within your conversations.
 
-## 🏛️ Microservices Architecture
+## 🏛️ Distributed Microservices Architecture
 
-GPT Researcher is built as a modular, containerized microservices architecture communicating via REST APIs and an asynchronous **Redis Pub/Sub Event Bus**:
+GPT Researcher is built as a fully decomposed, modular, containerized multi-agent microservices system communicating via high-throughput REST APIs and an asynchronous **Redis Pub/Sub Event Bus**:
 
 ```mermaid
 graph TD
-    UI["Next.js Web UI<br>Port 3000"]
-    GW["API Gateway<br>Port 8000 (FastAPI + WebSockets)"]
-    BUS[("Redis Pub/Sub<br>Port 6379")]
-    ORCH["Research Orchestrator<br>Port 8001 (Multi-Agent Engine)"]
-    SCRAP["Scraper & Search Service<br>Port 8002 (Playwright / BS4)"]
-    DOC["Document Service<br>Port 8003 (Vector & Local RAG)"]
-    EXP["Export Service<br>Port 8004 (PDF / DOCX / Markdown)"]
+    UI["🖥️ Next.js Web UI<br><b>:3000</b>"]
+    GW["🚪 API Gateway<br><b>:8000</b> (FastAPI + WebSockets)"]
+    BUS[("⚡ Redis Pub/Sub Event Bus<br><b>:6379</b>")]
+    
+    COORD["🎯 Workflow Coordinator<br><b>:8001</b> (Distributed Orchestrator)"]
+    
+    PLAN["📋 Planning Service<br><b>:8011</b> (Query Decomposition)"]
+    WORKER["🔎 Section Research Service<br><b>:8012</b> (Parallel Research)"]
+    REV["🧐 Reviewer Service<br><b>:8013</b> (Fact Verification)"]
+    WRITE["✍️ Writer Service<br><b>:8014</b> (Report Synthesis)"]
+    
+    SCRAP["🌐 Scraper & Search Service<br><b>:8002</b> (Tavily, DDG, Playwright)"]
+    DOC["📁 Document Service<br><b>:8003</b> (Vector Embeddings / RAG)"]
+    EXP["📄 Export Service<br><b>:8004</b> (PDF, DOCX, Markdown)"]
 
-    UI -->|REST / WebSocket /ws| GW
-    GW <-->|Event Stream| BUS
-    GW -->|/research| ORCH
-    GW -->|/upload, /query| DOC
-    GW -->|/export| EXP
-    ORCH <-->|Publish Events| BUS
-    ORCH -->|/search, /scrape| SCRAP
-    ORCH -->|/query| DOC
-    ORCH -->|/export| EXP
+    UI <-->|REST & WebSocket /ws| GW
+    GW <-->|Live Stream| BUS
+    GW -->|/api/research| COORD
+    GW -->|/api/upload| DOC
+    GW -->|/api/export| EXP
+
+    COORD <-->|Live Events| BUS
+    COORD -->|/plan| PLAN
+    COORD -->|/research-section| WORKER
+    COORD -->|/review| REV
+    COORD -->|/synthesize| WRITE
+    COORD -->|/export| EXP
+
+    WORKER -->|/search, /scrape| SCRAP
+    WORKER -->|/query| DOC
 ```
 
-### Microservices Breakdown
+### Microservices Directory & Port Breakdown
 
-| Service | Port | Directory | Description |
+| Service | Port | Directory | Core Functionality |
 |---|---|---|---|
-| **Next.js Web UI** | `3000` | [`frontend/nextjs`](./frontend/nextjs) | Modern Next.js UI with real-time streaming, chat, and report downloads |
-| **API Gateway** | `8000` | [`services/api_gateway`](./services/api_gateway) | Public FastAPI reverse proxy, WebSocket multiplexer, report storage, and chat |
-| **Research Orchestrator** | `8001` | [`services/research_orchestrator`](./services/research_orchestrator) | Multi-agent research planner, query execution, and report synthesizer |
-| **Scraper Service** | `8002` | [`services/scraper_service`](./services/scraper_service) | Headless web scraping (Playwright/BS4) and search retrievers (Tavily, DDG, etc.) |
-| **Document Service** | `8003` | [`services/document_service`](./services/document_service) | Document parser (PDF, DOCX, TXT) and vector search similarity engine |
-| **Export Service** | `8004` | [`services/export_service`](./services/export_service) | High-fidelity PDF (WeasyPrint), Word (DOCX), and Markdown document generator |
-| **Redis Event Bus** | `6379` | `redis:7-alpine` | Asynchronous pub/sub event broker for live agent progress streaming |
+| **Next.js Web UI** | `3000` | [`frontend/nextjs`](./frontend/nextjs) | Responsive React UI with real-time agent thought logs, interactive chat, and one-click report downloads. |
+| **API Gateway** | `8000` | [`services/api_gateway`](./services/api_gateway) | Public entrypoint reverse proxy, WebSocket multiplexer, JSON history database, and chat endpoints. |
+| **Workflow Coordinator** | `8001` | [`services/research_orchestrator`](./services/research_orchestrator) | High-speed distributed coordinator managing parallel agent tasks, token budgets, and Redis event streams. |
+| **Planning Service** | `8011` | [`services/planning_service`](./services/planning_service) | Specialized agent decomposing broad research queries into structured subtopics and targeted search queries. |
+| **Section Research Service** | `8012` | [`services/section_research_service`](./services/section_research_service) | Worker instances executing concurrent parallel web/doc retrieval and section draft generation. |
+| **Reviewer Service** | `8013` | [`services/reviewer_service`](./services/reviewer_service) | Critique agent performing hallucination verification, quality scoring, and citation grounding checks. |
+| **Writer Service** | `8014` | [`services/writer_service`](./services/writer_service) | Synthesis agent assembling cohesive, publication-grade markdown reports with formatted bibliography. |
+| **Scraper & Search Service** | `8002` | [`services/scraper_service`](./services/scraper_service) | Threadpool search retrievers (Tavily, DuckDuckGo, Google) with in-memory TTL caching and headless scraping. |
+| **Document Service** | `8003` | [`services/document_service`](./services/document_service) | Multi-format document parser (PDF, DOCX, TXT) and vector embedding similarity engine. |
+| **Export Service** | `8004` | [`services/export_service`](./services/export_service) | Parallel multi-format document generator producing publication-ready PDF (WeasyPrint), DOCX, and Markdown. |
+| **Redis Event Bus** | `6379` | `redis:7-alpine` | Low-latency pub/sub message broker for live WebSocket progress streaming and inter-service telemetry. |
 
 ---
 
