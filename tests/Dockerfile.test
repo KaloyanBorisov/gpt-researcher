@@ -1,0 +1,25 @@
+FROM python:3.11-slim
+
+WORKDIR /usr/src/app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl build-essential libpango-1.0-0 libharfbuzz0b libpangoft2-1.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt ./
+COPY services/scraper_service/requirements.txt ./scraper_req.txt
+COPY services/export_service/requirements.txt ./export_req.txt
+COPY services/document_service/requirements.txt ./doc_req.txt
+COPY services/research_orchestrator/requirements.txt ./orchestrator_req.txt
+COPY services/api_gateway/requirements.txt ./gateway_req.txt
+
+RUN pip install --no-cache-dir pytest pytest-asyncio httpx fastapi uvicorn pydantic pydantic-settings python-multipart python-docx htmldocx mistune md2pdf json-repair colorama langchain langchain-community
+RUN pip install --no-cache-dir -r requirements.txt || true
+
+COPY gpt_researcher ./gpt_researcher
+COPY services ./services
+COPY tests ./tests
+
+ENV PYTHONUNBUFFERED=1
+
+CMD ["pytest", "tests/test_microservices_container.py", "tests/test_microservices.py", "-v"]
