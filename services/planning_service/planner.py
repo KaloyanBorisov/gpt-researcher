@@ -19,23 +19,6 @@ class ResearchPlanner:
         logger.info(f"Generating research plan for task: '{request.task}' (Tone: {request.tone})")
         cfg = Config()
 
-        child_run = None
-        callbacks = []
-        if request.parent_run_id and (os.getenv("LANGCHAIN_TRACING_V2") == "true" or os.getenv("LANGSMITH_TRACING") == "true"):
-            try:
-                from langsmith.run_trees import RunTree
-                child_run = RunTree(
-                    name="Planning Agent",
-                    run_type="chain",
-                    parent_run_id=request.parent_run_id,
-                    inputs={"task": request.task, "tone": request.tone, "max_subtopics": request.max_subtopics},
-                    project_name=os.getenv("LANGSMITH_PROJECT", "gpt-researcher")
-                )
-                child_run.post()
-                callbacks = [child_run.get_langchain_callback()]
-            except Exception as tr_err:
-                logger.warning(f"Failed to create child RunTree for planner: {tr_err}")
-
         prompt = (
             f"You are a master research planner. Analyze the query and generate a focused plan with max {request.max_subtopics or 3} subtopics.\n\n"
             f"Research Query: \"{request.task}\"\n"
@@ -66,8 +49,7 @@ class ResearchPlanner:
                 model=cfg.fast_llm_model,
                 llm_provider=cfg.fast_llm_provider,
                 temperature=0.3,
-                max_tokens=600,
-                callbacks=callbacks
+                max_tokens=600
             )
 
             # Strip markdown fences if present
@@ -96,11 +78,6 @@ class ResearchPlanner:
                 subtopics=subtopics,
                 initial_summary=parsed.get("initial_summary", "")
             )
-
-            if child_run:
-                child_run.end(outputs=response.model_dump())
-                child_run.patch()
-
             return response
         except Exception as e:
             logger.warning(f"Error parsing LLM plan: {e}. Falling back to default plan structure.")
@@ -109,15 +86,11 @@ class ResearchPlanner:
                 description="Comprehensive investigation",
                 subqueries=[request.task, f"{request.task} overview", f"{request.task} analysis"]
             )
-            fallback_res = PlanResponse(
+            return PlanResponse(
                 task=request.task,
                 outline=["Introduction", request.task, "Analysis", "Conclusion"],
                 subtopics=[default_subtopic],
                 initial_summary="Direct investigation of research topic"
             )
-            if child_run:
-                child_run.end(outputs=fallback_res.model_dump())
-                child_run.patch()
-            return fallback_res
 
 planner = ResearchPlanner()

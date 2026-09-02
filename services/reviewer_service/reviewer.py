@@ -19,23 +19,6 @@ class ReportReviewer:
         logger.info(f"Reviewing research draft for task: '{request.task}'")
         cfg = Config()
 
-        child_run = None
-        callbacks = []
-        if request.parent_run_id and (os.getenv("LANGCHAIN_TRACING_V2") == "true" or os.getenv("LANGSMITH_TRACING") == "true"):
-            try:
-                from langsmith.run_trees import RunTree
-                child_run = RunTree(
-                    name="Reviewer Agent",
-                    run_type="chain",
-                    parent_run_id=request.parent_run_id,
-                    inputs={"task": request.task, "sources_count": len(request.sources)},
-                    project_name=os.getenv("LANGSMITH_PROJECT", "gpt-researcher")
-                )
-                child_run.post()
-                callbacks = [child_run.get_langchain_callback()]
-            except Exception as tr_err:
-                logger.warning(f"Failed to create child RunTree for reviewer: {tr_err}")
-
         prompt = (
             f"You are a strict editorial quality assurance reviewer.\n\n"
             f"Research Task: \"{request.task}\"\n"
@@ -62,8 +45,7 @@ class ReportReviewer:
                 model=cfg.fast_llm_model,
                 llm_provider=cfg.fast_llm_provider,
                 temperature=0.2,
-                max_tokens=500,
-                callbacks=callbacks
+                max_tokens=500
             )
 
             cleaned = raw_response.strip()
@@ -76,27 +58,19 @@ class ReportReviewer:
             cleaned = cleaned.strip()
 
             parsed = json.loads(cleaned)
-            response = ReviewResponse(
+            return ReviewResponse(
                 score=float(parsed.get("score", 1.0)),
                 passed=bool(parsed.get("passed", True)),
                 feedback=parsed.get("feedback", "Draft meets quality criteria."),
                 revision_suggestions=parsed.get("revision_suggestions", [])
             )
-            if child_run:
-                child_run.end(outputs=response.model_dump())
-                child_run.patch()
-            return response
         except Exception as e:
             logger.warning(f"Reviewer parse error: {e}. Falling back to default approval.")
-            fallback_res = ReviewResponse(
+            return ReviewResponse(
                 score=1.0,
                 passed=True,
                 feedback="Content verified and approved.",
                 revision_suggestions=[]
             )
-            if child_run:
-                child_run.end(outputs=fallback_res.model_dump())
-                child_run.patch()
-            return fallback_res
 
 reviewer = ReportReviewer()

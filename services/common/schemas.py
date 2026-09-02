@@ -128,6 +128,7 @@ class PlanRequest(BaseModel):
     report_type: str = Field(default="research_report")
     tone: str = Field(default="Objective")
     max_subtopics: Optional[int] = 5
+    parent_run_id: Optional[str] = None
 
 class PlanResponse(BaseModel):
     task: str
@@ -142,6 +143,7 @@ class SectionResearchRequest(BaseModel):
     report_source: str = "web"
     tone: str = "Objective"
     max_results_per_query: Optional[int] = 4
+    parent_run_id: Optional[str] = None
 
 class SectionResearchResponse(BaseModel):
     subtopic: str
@@ -155,6 +157,7 @@ class ReviewRequest(BaseModel):
     content: str
     sources: List[str] = []
     guidelines: Optional[str] = None
+    parent_run_id: Optional[str] = None
 
 class ReviewResponse(BaseModel):
     score: float = 1.0
@@ -169,6 +172,7 @@ class SynthesisRequest(BaseModel):
     outline: List[str] = []
     sections: List[Dict[str, Any]] = []
     sources: List[str] = []
+    parent_run_id: Optional[str] = None
 
 class SynthesisResponse(BaseModel):
     report_markdown: str

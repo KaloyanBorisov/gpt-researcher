@@ -21,23 +21,6 @@ class SectionResearchWorker:
         logger.info(f"Conducting concurrent section research for subtopic: '{request.subtopic}'")
         cfg = Config()
 
-        child_run = None
-        callbacks = []
-        if request.parent_run_id and (os.getenv("LANGCHAIN_TRACING_V2") == "true" or os.getenv("LANGSMITH_TRACING") == "true"):
-            try:
-                from langsmith.run_trees import RunTree
-                child_run = RunTree(
-                    name=f"Section Research: {request.subtopic[:40]}",
-                    run_type="chain",
-                    parent_run_id=request.parent_run_id,
-                    inputs={"task": request.task, "subtopic": request.subtopic, "subqueries": request.subqueries},
-                    project_name=os.getenv("LANGSMITH_PROJECT", "gpt-researcher")
-                )
-                child_run.post()
-                callbacks = [child_run.get_langchain_callback()]
-            except Exception as tr_err:
-                logger.warning(f"Failed to create child RunTree for section worker: {tr_err}")
-
         queries = request.subqueries if request.subqueries else [f"{request.task} {request.subtopic}"]
         target_queries = queries[:3]  # Focus on top 3 most targeted queries
 
@@ -106,24 +89,17 @@ class SectionResearchWorker:
                 model=cfg.fast_llm_model,
                 llm_provider=cfg.fast_llm_provider,
                 temperature=0.35,
-                max_tokens=2000,
-                callbacks=callbacks
+                max_tokens=2000
             )
         except Exception as llm_err:
             logger.error(f"Error drafting section: {llm_err}")
             draft_content = f"### {request.subtopic}\n\nAnalysis based on gathered context: {raw_context_str[:400]}..."
 
-        response = SectionResearchResponse(
+        return SectionResearchResponse(
             subtopic=request.subtopic,
             context=raw_context_str[:3000],
             sources=unique_sources,
             draft_content=draft_content
         )
-
-        if child_run:
-            child_run.end(outputs={"subtopic": response.subtopic, "sources_count": len(response.sources), "draft_length": len(draft_content)})
-            child_run.patch()
-
-        return response
 
 worker = SectionResearchWorker()

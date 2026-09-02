@@ -18,23 +18,6 @@ class ReportWriter:
         logger.info(f"Synthesizing final research report for task: '{request.task}'")
         cfg = Config()
 
-        child_run = None
-        callbacks = []
-        if request.parent_run_id and (os.getenv("LANGCHAIN_TRACING_V2") == "true" or os.getenv("LANGSMITH_TRACING") == "true"):
-            try:
-                from langsmith.run_trees import RunTree
-                child_run = RunTree(
-                    name="Writer Agent (Synthesis)",
-                    run_type="chain",
-                    parent_run_id=request.parent_run_id,
-                    inputs={"task": request.task, "report_type": request.report_type, "sections_count": len(request.sections)},
-                    project_name=os.getenv("LANGSMITH_PROJECT", "gpt-researcher")
-                )
-                child_run.post()
-                callbacks = [child_run.get_langchain_callback()]
-            except Exception as tr_err:
-                logger.warning(f"Failed to create child RunTree for writer: {tr_err}")
-
         # Assemble section drafts
         sections_text = ""
         for i, s in enumerate(request.sections, start=1):
@@ -71,8 +54,7 @@ class ReportWriter:
                 model=cfg.smart_llm_model,
                 llm_provider=cfg.smart_llm_provider,
                 temperature=0.35,
-                max_tokens=4000,
-                callbacks=callbacks
+                max_tokens=4000
             )
         except Exception as err:
             logger.error(f"Error during final report synthesis: {err}")
@@ -80,16 +62,10 @@ class ReportWriter:
             report_md = f"# {request.task}\n\n{sections_text}\n\n## References\n{sources_formatted}"
 
         word_count = len(report_md.split())
-        response = SynthesisResponse(
+        return SynthesisResponse(
             report_markdown=report_md,
             total_words=word_count,
             sources_used=request.sources
         )
-
-        if child_run:
-            child_run.end(outputs={"total_words": word_count, "sources_count": len(request.sources)})
-            child_run.patch()
-
-        return response
 
 writer = ReportWriter()
