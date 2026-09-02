@@ -1,53 +1,15 @@
 import json_repair
-import logging
-from typing import Any, Dict, List
 
 from gpt_researcher.llm_provider.generic.base import ReasoningEfforts
-
-from ..config import Config
-from ..prompts import PromptFamily
 from ..utils.llm import create_chat_completion
-
-
-def _normalize_sub_queries(parsed: Any, fallback_query: str) -> List[str]:
-    """Coerce a parsed LLM response into a flat list of query strings.
-
-    ``json_repair.loads`` may return a list, a dict (e.g. ``{"queries": [...]}``
-    or a single ``{"query": "..."}``), a bare string, or ``None`` when the model
-    does not return clean JSON. Callers expect a ``list[str]`` and otherwise crash
-    on ``.append`` / iteration, so normalize defensively here.
-    """
-    if isinstance(parsed, dict):
-        for key in ("queries", "sub_queries", "subQueries", "items"):
-            value = parsed.get(key)
-            if isinstance(value, list):
-                parsed = value
-                break
-        else:
-            # Single-query dict like {"query": "..."} or unrecognized shape.
-            single = parsed.get("query")
-            parsed = [single] if isinstance(single, str) else []
-
-    if isinstance(parsed, str):
-        parsed = [parsed] if parsed.strip() else []
-
-    if not isinstance(parsed, list):
-        parsed = []
-
-    queries = [str(item).strip() for item in parsed if str(item).strip()]
-    if not queries and fallback_query.strip():
-        return [fallback_query.strip()]
-    return queries
+from ..prompts import PromptFamily
+from typing import Any, List, Dict
+from ..config import Config
+import logging
 
 logger = logging.getLogger(__name__)
 
-async def get_search_results(
-    query: str,
-    retriever: Any,
-    query_domains: List[str] = None,
-    researcher=None,
-    max_results: int | None = None,
-) -> List[Dict[str, Any]]:
+async def get_search_results(query: str, retriever: Any, query_domains: List[str] = None, researcher=None) -> List[Dict[str, Any]]:
     """
     Get web search results for a given query.
 
@@ -56,13 +18,10 @@ async def get_search_results(
         retriever: The retriever instance
         query_domains: Optional list of domains to search
         researcher: The researcher instance (needed for MCP retrievers)
-        max_results: Optional cap on the number of results
 
     Returns:
         A list of search results
     """
-    import asyncio
-
     # Check if this is an MCP retriever and pass the researcher instance
     if "mcpretriever" in retriever.__name__.lower():
         search_retriever = retriever(
@@ -72,13 +31,8 @@ async def get_search_results(
         )
     else:
         search_retriever = retriever(query, query_domains=query_domains)
-
-    search_kwargs = {}
-    if max_results is not None:
-        search_kwargs["max_results"] = max_results
-
-    # Retriever searches are blocking HTTP calls; keep the event loop free
-    return await asyncio.to_thread(search_retriever.search, **search_kwargs)
+    
+    return search_retriever.search()
 
 async def generate_sub_queries(
     query: str,
@@ -153,7 +107,7 @@ async def generate_sub_queries(
                 **kwargs
             )
 
-    return _normalize_sub_queries(json_repair.loads(response), query)
+    return json_repair.loads(response)
 
 async def plan_research_outline(
     query: str,

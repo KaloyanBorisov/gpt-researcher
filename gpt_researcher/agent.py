@@ -4,7 +4,6 @@ This module provides the main GPTResearcher class that orchestrates
 autonomous research and report generation using LLMs and web search.
 """
 
-import asyncio
 import json
 import os
 from typing import Any, Optional
@@ -283,28 +282,29 @@ class GPTResearcher:
     def _process_mcp_configs(self, mcp_configs: list[dict]) -> None:
         """
         Process MCP configurations from a list of configuration dictionaries.
-
-        Adds the MCP retriever to the active retriever list by modifying
-        self.cfg.retrievers directly.  Deliberately avoids touching os.environ
-        so that concurrent or subsequent requests are not affected by this
-        session's MCP settings (fixes issue #1676 – process-level env pollution).
-
+        
+        This method validates the MCP configurations. It only adds MCP to retrievers
+        if no explicit retriever configuration is provided via environment variables.
+        
         Args:
             mcp_configs (list[dict]): List of MCP server configuration dictionaries.
         """
-        # Add MCP to retrievers via cfg (not os.environ) to avoid env pollution.
-        if hasattr(self.cfg, 'retrievers') and self.cfg.retrievers:
-            current_retrievers = (
-                list(self.cfg.retrievers)
-                if isinstance(self.cfg.retrievers, list)
-                else [r.strip() for r in str(self.cfg.retrievers).split(",") if r.strip()]
-            )
-            if "mcp" not in current_retrievers:
-                current_retrievers.append("mcp")
-                self.cfg.retrievers = current_retrievers
-        else:
-            self.cfg.retrievers = ["mcp"]
-
+        # Check if user explicitly set RETRIEVER environment variable
+        user_set_retriever = os.getenv("RETRIEVER") is not None
+        
+        if not user_set_retriever:
+            # Only auto-add MCP if user hasn't explicitly set retrievers
+            if hasattr(self.cfg, 'retrievers') and self.cfg.retrievers:
+                # If retrievers is set in config (but not via env var)
+                current_retrievers = set(self.cfg.retrievers.split(",")) if isinstance(self.cfg.retrievers, str) else set(self.cfg.retrievers)
+                if "mcp" not in current_retrievers:
+                    current_retrievers.add("mcp")
+                    self.cfg.retrievers = ",".join(filter(None, current_retrievers))
+            else:
+                # No retrievers configured, use mcp as default
+                self.cfg.retrievers = "mcp"
+        # If user explicitly set RETRIEVER, respect their choice and don't auto-add MCP
+        
         # Store the mcp_configs for use by the MCP retriever
         self.mcp_configs = mcp_configs
 
@@ -516,45 +516,26 @@ class GPTResearcher:
         await self._log_event("research", step="introduction_completed")
         return intro
 
-    async def quick_search(
-        self,
-        query: str,
-        query_domains: list[str] = None,
-        aggregated_summary: bool = False,
-        all_retrievers: bool = False,
-    ) -> list[Any] | str:
+    async def quick_search(self, query: str, query_domains: list[str] = None, aggregated_summary: bool = False) -> list[Any] | str:
         """Perform a quick search without full research workflow.
 
         Args:
             query: The search query.
             query_domains: Optional list of domains to restrict search to.
             aggregated_summary: Whether to return an aggregated summary of the search results.
-            all_retrievers: If True, query every configured retriever concurrently and
-                merge the results (de-duplicated by URL). Defaults to False, which uses
-                only the primary retriever for backward compatibility.
 
         Returns:
             List of search results or a synthesized summary string.
         """
-        if all_retrievers and len(self.retrievers) > 1:
-            search_results = await self._search_all_retrievers(query, query_domains)
-        else:
-            search_results = await get_search_results(
-                query, self.retrievers[0], query_domains=query_domains, researcher=self
-            )
+        search_results = await get_search_results(query, self.retrievers[0], query_domains=query_domains)
 
         if not aggregated_summary:
             return search_results
 
-        # Format results for summary. Search retrievers return records keyed
-        # by "href" (URL) and "body" (content); fall back to the alternate
-        # keys so callers that pass pre-normalized records still work.
+        # Format results for summary
         context = ""
         for i, result in enumerate(search_results, 1):
-            title = result.get("title", "")
-            body = result.get("body") or result.get("content", "")
-            url = result.get("href") or result.get("url", "")
-            context += f"[{i}] {title}: {body} ({url})\n\n"
+            context += f"[{i}] {result.get('title', '')}: {result.get('content', '')} ({result.get('url', '')})\n\n"
 
         prompt = self.prompt_family.generate_quick_summary_prompt(query, context)
 
@@ -568,42 +549,6 @@ class GPTResearcher:
         )
 
         return summary
-
-    async def _search_all_retrievers(
-        self, query: str, query_domains: list[str] = None
-    ) -> list[dict[str, Any]]:
-        """Query every configured retriever concurrently and merge the results.
-
-        Results are de-duplicated by URL (checking both ``url`` and ``href`` keys,
-        which different retrievers use). Retrievers that raise are skipped so a
-        single failing provider does not abort the whole search.
-
-        Args:
-            query: The search query.
-            query_domains: Optional list of domains to restrict search to.
-
-        Returns:
-            A merged, de-duplicated list of search results.
-        """
-        tasks = [
-            get_search_results(query, retriever, query_domains=query_domains, researcher=self)
-            for retriever in self.retrievers
-        ]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        merged: list[dict[str, Any]] = []
-        seen_urls: set[str] = set()
-        for result in results:
-            if isinstance(result, Exception) or not result:
-                continue
-            for item in result:
-                url = item.get("url") or item.get("href") or ""
-                if url and url in seen_urls:
-                    continue
-                if url:
-                    seen_urls.add(url)
-                merged.append(item)
-        return merged
 
     async def get_subtopics(self):
         """Generate subtopics for the research query.

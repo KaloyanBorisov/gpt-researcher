@@ -42,14 +42,23 @@ const ResearchSidebar: React.FC<ResearchSidebarProps> = ({
 
   // Format timestamp for display
   const formatTimestamp = (timestamp: number | string | Date | undefined) => {
-    if (!timestamp) return 'Unknown time';
+    if (!timestamp) return 'Just now';
     
     try {
+      let num = typeof timestamp === 'number' ? timestamp : Number(timestamp);
+      if (num && !isNaN(num)) {
+        if (num < 10000000000) {
+          num = num * 1000;
+        }
+        const date = new Date(num);
+        if (date.getFullYear() < 2020) return 'Just now';
+        return formatDistanceToNow(date, { addSuffix: true });
+      }
       const date = new Date(timestamp);
-      if (isNaN(date.getTime())) return 'Unknown time';
+      if (isNaN(date.getTime()) || date.getFullYear() < 2020) return 'Just now';
       return formatDistanceToNow(date, { addSuffix: true });
     } catch {
-      return 'Unknown time';
+      return 'Just now';
     }
   };
 

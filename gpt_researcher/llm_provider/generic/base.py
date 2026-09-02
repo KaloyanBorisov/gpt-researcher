@@ -35,9 +35,6 @@ _SUPPORTED_PROVIDERS = {
     "netmind",
     "forge",
     "avian",
-    "minimax",
-    "atlascloud",
-    "nebius",
 }
 
 NO_SUPPORT_TEMPERATURE_MODELS = [
@@ -56,22 +53,6 @@ NO_SUPPORT_TEMPERATURE_MODELS = [
     # GPT-5 family: OpenAI enforces default temperature only
     "gpt-5",
     "gpt-5-mini",
-    "gpt-5-nano",
-    "gpt-5.4",
-    "gpt-5.4-mini",
-    "gpt-5.4-nano",
-    "gpt-5.4-pro",
-    "gpt-5.5",
-    "gpt-5.5-pro",
-    # Claude 4.x family: Anthropic deprecates temperature on these models
-    "claude-sonnet-4-5",
-    "claude-sonnet-4-5-20250929",
-    "claude-sonnet-4-6",
-    "claude-opus-4-5",
-    "claude-opus-4-6",
-    "claude-opus-4-7",
-    "claude-haiku-4-5",
-    "claude-haiku-4-5-20251001",
 ]
 
 SUPPORT_REASONING_EFFORT_MODELS = [
@@ -81,12 +62,6 @@ SUPPORT_REASONING_EFFORT_MODELS = [
     "o3-2025-04-16",
     "o4-mini",
     "o4-mini-2025-04-16",
-    "gpt-5.4",
-    "gpt-5.4-mini",
-    "gpt-5.4-nano",
-    "gpt-5.4-pro",
-    "gpt-5.5",
-    "gpt-5.5-pro",
 ]
 
 class ReasoningEfforts(Enum):
@@ -119,29 +94,6 @@ class GenericLLMProvider:
         self.llm = llm
         self.chat_logger = ChatLogger(chat_log) if chat_log else None
         self.verbose = verbose
-        self.last_usage_metadata: dict[str, Any] | None = None
-        self.last_response_metadata: dict[str, Any] = {}
-
-    def _reset_last_response_metadata(self) -> None:
-        self.last_usage_metadata = None
-        self.last_response_metadata = {}
-
-    def _capture_response_metadata(self, message: Any) -> None:
-        usage_metadata = getattr(message, "usage_metadata", None)
-        if usage_metadata:
-            if hasattr(usage_metadata, "model_dump"):
-                usage_metadata = usage_metadata.model_dump()
-            self.last_usage_metadata = dict(usage_metadata)
-
-        response_metadata = getattr(message, "response_metadata", None)
-        if response_metadata:
-            if hasattr(response_metadata, "model_dump"):
-                response_metadata = response_metadata.model_dump()
-            self.last_response_metadata = {
-                **self.last_response_metadata,
-                **dict(response_metadata),
-            }
-
     @classmethod
     def from_provider(cls, provider: str, chat_log: str | None = None, verbose: bool=True, **kwargs: Any):
         if provider == "openai":
@@ -151,10 +103,6 @@ class GenericLLMProvider:
             # Support custom OpenAI-compatible APIs via OPENAI_BASE_URL
             if "openai_api_base" not in kwargs and os.environ.get("OPENAI_BASE_URL"):
                 kwargs["openai_api_base"] = os.environ["OPENAI_BASE_URL"]
-
-            # Report token usage on streamed responses too, so cost
-            # tracking can use real usage instead of tiktoken estimates.
-            kwargs.setdefault("stream_usage", True)
 
             llm = ChatOpenAI(**kwargs)
         elif provider == "anthropic":
@@ -196,12 +144,7 @@ class GenericLLMProvider:
             _check_pkg("langchain_ollama")
             from langchain_ollama import ChatOllama
 
-            # Use OLLAMA_BASE_URL from env if not already supplied in kwargs;
-            # fall back to the Ollama default so OLLAMA_BASE_URL is optional.
-            if "base_url" not in kwargs:
-                kwargs["base_url"] = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
-
-            llm = ChatOllama(**kwargs)
+            llm = ChatOllama(base_url=os.environ["OLLAMA_BASE_URL"], **kwargs)
         elif provider == "together":
             _check_pkg("langchain_together")
             from langchain_together import ChatTogether
@@ -210,10 +153,6 @@ class GenericLLMProvider:
         elif provider == "mistralai":
             _check_pkg("langchain_mistralai")
             from langchain_mistralai import ChatMistralAI
-
-            # Support custom Mistral-compatible APIs via MISTRAL_BASE_URL
-            if "endpoint" not in kwargs and "base_url" not in kwargs and os.environ.get("MISTRAL_BASE_URL"):
-                kwargs["endpoint"] = os.environ["MISTRAL_BASE_URL"]
 
             llm = ChatMistralAI(**kwargs)
         elif provider == "huggingface":
@@ -258,14 +197,6 @@ class GenericLLMProvider:
                      openai_api_key=os.environ["DEEPSEEK_API_KEY"],
                      **kwargs
                 )
-        elif provider == "atlascloud":
-            _check_pkg("langchain_openai")
-            from langchain_openai import ChatOpenAI
-
-            llm = ChatOpenAI(openai_api_base='https://api.atlascloud.ai/v1',
-                     openai_api_key=os.environ["ATLASCLOUD_API_KEY"],
-                     **kwargs
-                )
         elif provider == "litellm":
             _check_pkg("langchain_community")
             from langchain_community.chat_models.litellm import ChatLiteLLM
@@ -280,22 +211,49 @@ class GenericLLMProvider:
         elif provider == "openrouter":
             _check_pkg("langchain_openai")
             from langchain_openai import ChatOpenAI
-            from langchain_core.rate_limiters import InMemoryRateLimiter
 
-            rps = float(os.environ["OPENROUTER_LIMIT_RPS"]) if "OPENROUTER_LIMIT_RPS" in os.environ else 1.0
+            api_base = os.environ.get("OPENROUTER_BASE_URL") or os.environ.get("OPENROUTER_API_BASE") or "https://openrouter.ai/api/v1"
+            api_key = kwargs.pop("openai_api_key", None) or os.environ.get("OPENROUTER_API_KEY")
 
-            rate_limiter = InMemoryRateLimiter(
-                requests_per_second=rps,
-                check_every_n_seconds=0.1,
-                max_bucket_size=10,
-            )
+            # OpenRouter expects provider/model format (e.g. openai/gpt-4o-mini, anthropic/claude-3.5-sonnet)
+            model_name = kwargs.get("model")
+            if model_name and "/" not in model_name:
+                if model_name.startswith("claude"):
+                    kwargs["model"] = f"anthropic/{model_name}"
+                elif model_name.startswith("mistral") or model_name.startswith("mixtral"):
+                    kwargs["model"] = f"mistralai/{model_name}"
+                elif model_name.startswith("gemini"):
+                    kwargs["model"] = f"google/{model_name}"
+                elif model_name.startswith("deepseek"):
+                    kwargs["model"] = f"deepseek/{model_name}"
+                else:
+                    kwargs["model"] = f"openai/{model_name}"
 
-            llm = ChatOpenAI(openai_api_base='https://openrouter.ai/api/v1',
-                     request_timeout=180,
-                     openai_api_key=os.environ["OPENROUTER_API_KEY"],
-                     rate_limiter=rate_limiter,
-                     **kwargs
+            # OpenRouter metadata headers
+            default_headers = kwargs.pop("default_headers", None) or {}
+            if "HTTP-Referer" not in default_headers:
+                default_headers["HTTP-Referer"] = os.environ.get("OPENROUTER_HTTP_REFERER", "https://gptr.dev")
+            if "X-Title" not in default_headers:
+                default_headers["X-Title"] = os.environ.get("OPENROUTER_TITLE", "GPT-Researcher")
+
+            openrouter_kwargs = {
+                "openai_api_base": api_base,
+                "openai_api_key": api_key,
+                "request_timeout": kwargs.pop("request_timeout", 180),
+                "default_headers": default_headers,
+                **kwargs,
+            }
+
+            if "OPENROUTER_LIMIT_RPS" in os.environ:
+                from langchain_core.rate_limiters import InMemoryRateLimiter
+                rps = float(os.environ["OPENROUTER_LIMIT_RPS"])
+                openrouter_kwargs["rate_limiter"] = InMemoryRateLimiter(
+                    requests_per_second=rps,
+                    check_every_n_seconds=0.1,
+                    max_bucket_size=10,
                 )
+
+            llm = ChatOpenAI(**openrouter_kwargs)
         elif provider == "vllm_openai":
             _check_pkg("langchain_openai")
             from langchain_openai import ChatOpenAI
@@ -328,23 +286,6 @@ class GenericLLMProvider:
                      openai_api_key=os.environ["AVIAN_API_KEY"],
                      **kwargs
                 )
-        elif provider == "minimax":
-            _check_pkg("langchain_openai")
-            from langchain_openai import ChatOpenAI
-
-            llm = ChatOpenAI(openai_api_base='https://api.minimax.io/v1',
-                     openai_api_key=os.environ["MINIMAX_API_KEY"],
-                     **kwargs
-                )
-        elif provider == "nebius":
-            _check_pkg("langchain_openai")
-            from langchain_openai import ChatOpenAI
-
-            # NEBIUS_BASE_URL overrides the default endpoint (self-hosted / regional)
-            llm = ChatOpenAI(openai_api_base=os.getenv("NEBIUS_BASE_URL", 'https://api.tokenfactory.nebius.com/v1'),
-                     openai_api_key=os.environ["NEBIUS_API_KEY"],
-                     **kwargs
-                )
         elif provider == 'netmind':
             _check_pkg("langchain_netmind")
             from langchain_netmind import ChatNetmind
@@ -359,11 +300,9 @@ class GenericLLMProvider:
 
 
     async def get_chat_response(self, messages, stream, websocket=None, **kwargs):
-        self._reset_last_response_metadata()
         if not stream:
             # Getting output from the model chain using ainvoke for asynchronous invoking
             output = await self.llm.ainvoke(messages, **kwargs)
-            self._capture_response_metadata(output)
 
             res = output.content
 
@@ -376,21 +315,18 @@ class GenericLLMProvider:
         return res
 
     async def stream_response(self, messages, websocket=None, **kwargs):
-        self._reset_last_response_metadata()
         paragraph = ""
         response = ""
 
         # Streaming the response using the chain astream method from langchain
         async for chunk in self.llm.astream(messages, **kwargs):
-            self._capture_response_metadata(chunk)
             content = chunk.content
-            if not content:
-                continue
-            response += content
-            paragraph += content
-            if "\n" in paragraph:
-                await self._send_output(paragraph, websocket)
-                paragraph = ""
+            if content is not None:
+                response += content
+                paragraph += content
+                if "\n" in paragraph:
+                    await self._send_output(paragraph, websocket)
+                    paragraph = ""
 
         if paragraph:
             await self._send_output(paragraph, websocket)
@@ -401,7 +337,7 @@ class GenericLLMProvider:
         if websocket is not None:
             await websocket.send_json({"type": "report", "output": content})
         elif self.verbose:
-            print(f"{Fore.GREEN}{content}{Style.RESET_ALL}", flush=True)
+            print(f"{Fore.GREEN}{content}{Style.RESET_ALL}")
 
 
 def _check_pkg(pkg: str) -> None:

@@ -4,15 +4,12 @@ DEFAULT_CONFIG: BaseConfig = {
     "RETRIEVER": "tavily",
     "EMBEDDING": "openai:text-embedding-3-small",
     "SIMILARITY_THRESHOLD": 0.42,
-    "FAST_LLM": "openai:gpt-5.4-mini",
-    "SMART_LLM": "openai:gpt-5.4",  # Has support for long responses (2k+ words).
-    "STRATEGIC_LLM": "openai:gpt-5.4",  # Reasoning model used for planning; tune REASONING_EFFORT for speed vs. depth.
-    # Output token limits. For reasoning models (the default gpt-5.x family)
-    # these map to max_completion_tokens, which also covers reasoning tokens -
-    # hence the generous headroom on top of the visible output.
-    "FAST_TOKEN_LIMIT": 6000,
-    "SMART_TOKEN_LIMIT": 12000,
-    "STRATEGIC_TOKEN_LIMIT": 8000,
+    "FAST_LLM": "openai:gpt-4o-mini",
+    "SMART_LLM": "openai:gpt-4.1",  # Has support for long responses (2k+ words).
+    "STRATEGIC_LLM": "openai:o4-mini",  # Can be used with o1 or o3, please note it will make tasks slower.
+    "FAST_TOKEN_LIMIT": 3000,
+    "SMART_TOKEN_LIMIT": 6000,
+    "STRATEGIC_TOKEN_LIMIT": 4000,
     "BROWSE_CHUNK_MAX_LENGTH": 8192,
     "CURATE_SOURCES": False,
     "SUMMARY_TOKEN_LIMIT": 700,
@@ -54,5 +51,4 @@ DEFAULT_CONFIG: BaseConfig = {
     "IMAGE_GENERATION_MAX_IMAGES": 3,  # Maximum number of images to generate per report
     "IMAGE_GENERATION_ENABLED": False,  # Master switch for inline image generation
     "IMAGE_GENERATION_STYLE": "dark",  # Image style: "dark" (matches app theme), "light", or "auto"
-    "IMAGE_GENERATION_PROVIDER": "google",  # Image provider: "google" or "modelslab"
 }

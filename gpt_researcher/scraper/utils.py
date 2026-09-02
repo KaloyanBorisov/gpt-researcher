@@ -18,8 +18,6 @@ def get_relevant_images(soup: BeautifulSoup, url: str) -> list:
     image_urls = []
     
     try:
-        if soup is None:
-            return []
         # Find all img tags with src attribute
         all_images = soup.find_all('img', src=True)
         
@@ -28,12 +26,7 @@ def get_relevant_images(soup: BeautifulSoup, url: str) -> list:
             if img_src.startswith(('http://', 'https://')):
                 score = 0
                 # Check for relevant classes
-                classes = img.get("class") or []
-                if isinstance(classes, str):
-                    classes = classes.split()
-                elif not isinstance(classes, (list, tuple, set)):
-                    classes = []
-                if any(cls in classes for cls in ['header', 'featured', 'hero', 'thumbnail', 'main', 'content']):
+                if any(cls in img.get('class', []) for cls in ['header', 'featured', 'hero', 'thumbnail', 'main', 'content']):
                     score = 4  # Higher score
                 # Check for size attributes
                 elif img.get('width') and img.get('height'):
@@ -64,39 +57,17 @@ def get_relevant_images(soup: BeautifulSoup, url: str) -> list:
 
 def parse_dimension(value: str) -> int:
     """Parse dimension value, handling px units"""
-    # HTML width/height attrs are often missing or non-string; callers pass
-    # img.get('width') which may be None.
-    if value is None:
-        return None
-    if not isinstance(value, str):
-        try:
-            return int(float(value))
-        except (ValueError, TypeError) as e:
-            logging.debug("Could not parse dimension value %r: %s", value, e)
-            return None
     if value.lower().endswith('px'):
         value = value[:-2]  # Remove 'px' suffix
     try:
-        # Convert to float first to handle decimal values like '409.12'
-        return int(float(value))
-    except (ValueError, TypeError) as e:
-        # Non-numeric dimensions (e.g. '100%', 'auto', '50em') are common and
-        # expected on real pages; log at debug level instead of spamming stdout.
-        logging.debug("Could not parse dimension value %r: %s", value, e)
+        return int(value)  # Convert to float first to handle decimal values
+    except ValueError as e:
+        print(f"Error parsing dimension value {value}: {e}")
         return None
 
 def extract_title(soup: BeautifulSoup) -> str:
-    """Extract the title text from the BeautifulSoup object.
-
-    Always returns a string. An empty ``<title></title>`` yields ``""`` (not
-    ``None``), and a title containing nested markup (e.g.
-    ``<title><span>x</span></title>``) yields its text content rather than the
-    raw inner HTML.
-    """
-    title_tag = soup.title
-    if not title_tag:
-        return ""
-    return title_tag.get_text(strip=True)
+    """Extract the title from the BeautifulSoup object"""
+    return soup.title.string if soup.title else ""
 
 def get_image_hash(image_url: str) -> str:
     """Calculate a simple hash based on the image filename and essential query parameters"""
@@ -155,8 +126,6 @@ def clean_soup(soup: BeautifulSoup) -> BeautifulSoup:
 
 def get_text_from_soup(soup: BeautifulSoup) -> str:
     """Get the relevant text from the soup with improved filtering"""
-    if soup is None:
-        return ""
     text = soup.get_text(strip=True, separator="\n")
     # Remove excess whitespace
     text = re.sub(r"\s{2,}", " ", text)

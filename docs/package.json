@@ -27,7 +27,6 @@
   "dependencies": {
     "@docusaurus/core": "3.7.0",
     "@docusaurus/preset-classic": "3.7.0",
-    "@docusaurus/theme-mermaid": "3.7.0",
     "@easyops-cn/docusaurus-search-local": "^0.49.2",
     "@mdx-js/react": "^3.1.0",
     "@svgr/webpack": "^8.1.0",
@@ -37,8 +36,8 @@
     "minimatch": "3.0.5",
     "react": "^18.0.1",
     "react-dom": "^18.0.1",
-    "rehype-katex": "7",
-    "remark-math": "6",
+    "rehype-katex": "^7.0.1",
+    "remark-math": "3",
     "trim": "^0.0.3",
     "url-loader": "^4.1.1"
   },

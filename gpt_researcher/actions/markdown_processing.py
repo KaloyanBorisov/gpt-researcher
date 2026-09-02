@@ -12,8 +12,6 @@ def extract_headers(markdown_text: str) -> List[Dict]:
     Returns:
         List[Dict]: A list of dictionaries representing the header structure.
     """
-    if not isinstance(markdown_text, str) or not markdown_text:
-        return []
     headers = []
     parsed_md = markdown.markdown(markdown_text)
     lines = parsed_md.split("\n")
@@ -51,8 +49,6 @@ def extract_sections(markdown_text: str) -> List[Dict[str, str]]:
         List[Dict[str, str]]: List of sections, each section is a dictionary containing
         'section_title' and 'written_content'.
     """
-    if not isinstance(markdown_text, str) or not markdown_text:
-        return []
     sections = []
     parsed_md = markdown.markdown(markdown_text)
     
@@ -79,9 +75,6 @@ def table_of_contents(markdown_text: str) -> str:
     Returns:
         str: The generated table of contents.
     """
-    if not isinstance(markdown_text, str):
-        return ""
-
     def generate_table_of_contents(headers, indent_level=0):
         toc = ""
         for header in headers:
@@ -109,17 +102,9 @@ def add_references(report_markdown: str, visited_urls: set) -> str:
     Returns:
         str: The updated markdown report with added references.
     """
-    if not isinstance(report_markdown, str):
-        report_markdown = "" if report_markdown is None else str(report_markdown)
-    if visited_urls is None:
-        return report_markdown
     try:
         url_markdown = "\n\n\n## References\n\n"
-        # Sort so the reference list is deterministic. ``visited_urls`` is a
-        # set, whose iteration order varies from run to run (and across
-        # processes), which made the final report's References section
-        # non-reproducible for the same inputs.
-        url_markdown += "".join(f"- [{url}]({url})\n" for url in sorted(visited_urls))
+        url_markdown += "".join(f"- [{url}]({url})\n" for url in visited_urls)
         updated_markdown_report = report_markdown + url_markdown
         return updated_markdown_report
     except Exception as e:

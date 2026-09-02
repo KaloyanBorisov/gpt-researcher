@@ -1,11 +1,8 @@
 from typing import List, Dict, Any, Optional, Set
 import asyncio
 import logging
-import re
 import time
 from datetime import datetime, timedelta
-
-import json_repair
 
 from gpt_researcher.llm_provider.generic.base import ReasoningEfforts
 from ..utils.llm import create_chat_completion
@@ -16,193 +13,6 @@ logger = logging.getLogger(__name__)
 
 # Maximum words allowed in context (25k words for safety margin)
 MAX_CONTEXT_WORDS = 25000
-
-JSON_BLOCK_PATTERNS = [
-    re.compile(
-        r"```(?:json)?\s*(?P<payload>[\s\S]*?)```",
-        re.IGNORECASE,
-    ),
-    re.compile(r"(?P<payload>\[[\s\S]*\])"),
-    re.compile(r"(?P<payload>\{[\s\S]*\})"),
-]
-
-QUERY_LINE_PATTERN = re.compile(
-    r"^(?:[-*]|\d+[.)])?\s*Query:\s*(?P<query>.+)$",
-    re.IGNORECASE,
-)
-GOAL_LINE_PATTERN = re.compile(
-    r"^(?:[-*]|\d+[.)])?\s*(?:Goal|Research Goal):\s*(?P<goal>.+)$",
-    re.IGNORECASE,
-)
-QUESTION_LINE_PATTERN = re.compile(
-    r"^(?:[-*]|\d+[.)])?\s*(?:Question:\s*)?(?P<question>.+\?)$",
-    re.IGNORECASE,
-)
-LEARNING_LINE_PATTERN = re.compile(
-    r"^(?:[-*]|\d+[.)])?\s*Learning(?:\s*\[(?P<citation>[^\]]+)\])?:\s*(?P<learning>.+)$",
-    re.IGNORECASE,
-)
-URL_PATTERN = re.compile(r"https?://[^\s\]\)>\",;]+")
-
-
-def _extract_json_payloads(response: str) -> list[str]:
-    candidates: list[str] = []
-    seen: set[str] = set()
-
-    for pattern in JSON_BLOCK_PATTERNS:
-        for match in pattern.finditer(response):
-            candidate = match.group("payload").strip()
-            if candidate and candidate not in seen:
-                candidates.append(candidate)
-                seen.add(candidate)
-
-    return candidates
-
-
-def _load_repaired_json(response: str) -> Any:
-    for candidate in [response.strip(), *_extract_json_payloads(response)]:
-        if not candidate:
-            continue
-        try:
-            return json_repair.loads(candidate)
-        except Exception as exc:
-            logger.debug(
-                "json_repair failed on candidate (%d chars): %s",
-                len(candidate), exc,
-            )
-            continue
-    return None
-
-
-def parse_search_queries_response(response: str, num_queries: int) -> List[Dict[str, str]]:
-    parsed = _load_repaired_json(response)
-    candidate_queries = parsed
-    if isinstance(parsed, dict):
-        candidate_queries = parsed.get("queries") or parsed.get("searchQueries") or parsed.get("items")
-
-    if isinstance(candidate_queries, list):
-        queries = [
-            {
-                "query": item["query"].strip(),
-                "researchGoal": item["researchGoal"].strip(),
-            }
-            for item in candidate_queries
-            if isinstance(item, dict) and item.get("query") and item.get("researchGoal")
-        ]
-        if queries:
-            return queries[:num_queries]
-
-    queries: List[Dict[str, str]] = []
-    current_query: Dict[str, str] = {}
-
-    for raw_line in response.replace("```json", "").replace("```", "").splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-
-        query_match = QUERY_LINE_PATTERN.match(line)
-        goal_match = GOAL_LINE_PATTERN.match(line)
-
-        if query_match:
-            if current_query.get("query") and current_query.get("researchGoal"):
-                queries.append(current_query)
-            current_query = {"query": query_match.group("query").strip()}
-        elif goal_match and current_query.get("query"):
-            current_query["researchGoal"] = goal_match.group("goal").strip()
-
-    if current_query.get("query") and current_query.get("researchGoal"):
-        queries.append(current_query)
-
-    return queries[:num_queries]
-
-
-def parse_follow_up_questions_response(response: str, num_questions: int) -> List[str]:
-    parsed = _load_repaired_json(response)
-    candidate_questions = parsed
-    if isinstance(parsed, dict):
-        candidate_questions = parsed.get("questions") or parsed.get("followUpQuestions") or parsed.get("items")
-
-    if isinstance(candidate_questions, list):
-        questions = [str(item).strip() for item in candidate_questions if str(item).strip()]
-        if questions:
-            return questions[:num_questions]
-
-    questions: List[str] = []
-    for raw_line in response.replace("```json", "").replace("```", "").splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-
-        question_match = QUESTION_LINE_PATTERN.match(line)
-        if question_match:
-            questions.append(question_match.group("question").strip())
-
-    return questions[:num_questions]
-
-
-def parse_research_results_response(response: str, num_learnings: int) -> Dict[str, Any]:
-    parsed = _load_repaired_json(response)
-
-    if isinstance(parsed, dict):
-        learnings_payload = parsed.get("learnings", [])
-        follow_up_payload = parsed.get("followUpQuestions") or parsed.get("questions") or []
-        learnings: List[str] = []
-        citations: Dict[str, str] = {}
-
-        if isinstance(learnings_payload, list):
-            for item in learnings_payload:
-                if isinstance(item, dict):
-                    learning = str(item.get("insight") or item.get("learning") or "").strip()
-                    citation = str(item.get("sourceUrl") or item.get("citation") or "").strip()
-                else:
-                    learning = str(item).strip()
-                    citation = ""
-
-                if learning:
-                    learnings.append(learning)
-                    if citation:
-                        citations[learning] = citation
-
-        questions = [str(item).strip() for item in follow_up_payload if str(item).strip()]
-        if learnings or questions:
-            return {
-                "learnings": learnings[:num_learnings],
-                "followUpQuestions": questions[:num_learnings],
-                "citations": citations,
-            }
-
-    learnings: List[str] = []
-    questions: List[str] = []
-    citations: Dict[str, str] = {}
-
-    for raw_line in response.replace("```json", "").replace("```", "").splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-
-        learning_match = LEARNING_LINE_PATTERN.match(line)
-        question_match = QUESTION_LINE_PATTERN.match(line)
-
-        if learning_match:
-            learning = learning_match.group("learning").strip()
-            citation = (learning_match.group("citation") or "").strip()
-            if not citation:
-                url_match = URL_PATTERN.search(learning)
-                if url_match:
-                    citation = url_match.group(0)
-                    learning = learning.replace(citation, "").strip(" -")
-            if learning:
-                learnings.append(learning)
-                if citation:
-                    citations[learning] = citation
-        elif question_match:
-            questions.append(question_match.group("question").strip())
-
-    return {
-        "learnings": learnings[:num_learnings],
-        "followUpQuestions": questions[:num_learnings],
-        "citations": citations,
-    }
 
 def count_words(text) -> int:
     """Count words in a text string. Handles both strings and lists."""
@@ -217,14 +27,10 @@ def trim_context_to_word_limit(context_list: List[str], max_words: int = MAX_CON
 
     # Process in reverse to keep most recent items
     for item in reversed(context_list):
-        text = " ".join(str(part) for part in item) if isinstance(item, list) else str(item)
         words = count_words(item)
         if total_words + words <= max_words:
             trimmed_context.insert(0, item)  # Insert at start to maintain original order
             total_words += words
-        elif not trimmed_context:
-            trimmed_context.insert(0, " ".join(text.split()[:max_words]))
-            break
         else:
             break
 
@@ -259,23 +65,9 @@ class DeepResearchSkill:
     async def generate_search_queries(self, query: str, num_queries: int = 3) -> List[Dict[str, str]]:
         """Generate SERP queries for research"""
         messages = [
-            {
-                "role": "system",
-                "content": (
-                    "You are an expert researcher generating search queries. "
-                    "Return valid JSON only. Do not include markdown, code fences, bullets, numbering, or prose."
-                ),
-            },
-            {
-                "role": "user",
-                "content": (
-                    f"Given the following prompt, generate {num_queries} unique search queries to research the topic thoroughly. "
-                    "For each query, provide a research goal.\n\n"
-                    "Return ONLY a JSON array of objects using this exact schema:\n"
-                    '[{"query": "<search query>", "researchGoal": "<research goal>"}]\n\n'
-                    f"Prompt: {query}"
-                ),
-            },
+            {"role": "system", "content": "You are an expert researcher generating search queries."},
+            {"role": "user",
+             "content": f"Given the following prompt, generate {num_queries} unique search queries to research the topic thoroughly. For each query, provide a research goal. Format as 'Query: <query>' followed by 'Goal: <goal>' for each pair: {query}"}
         ]
 
         response = await create_chat_completion(
@@ -283,11 +75,26 @@ class DeepResearchSkill:
             llm_provider=self.researcher.cfg.strategic_llm_provider,
             model=self.researcher.cfg.strategic_llm_model,
             reasoning_effort=self.researcher.cfg.reasoning_effort,
-            temperature=0.4,
-            llm_kwargs=self.researcher.cfg.llm_kwargs
+            temperature=0.4
         )
 
-        return parse_search_queries_response(response, num_queries)
+        lines = response.split('\n')
+        queries = []
+        current_query = {}
+
+        for line in lines:
+            line = line.strip()
+            if line.startswith('Query:'):
+                if current_query:
+                    queries.append(current_query)
+                current_query = {'query': line.replace('Query:', '').strip()}
+            elif line.startswith('Goal:') and current_query:
+                current_query['researchGoal'] = line.replace('Goal:', '').strip()
+
+        if current_query:
+            queries.append(current_query)
+
+        return queries[:num_queries]
 
     async def generate_research_plan(self, query: str, num_questions: int = 3) -> List[str]:
         """Generate follow-up questions to clarify research direction"""
@@ -310,14 +117,7 @@ class DeepResearchSkill:
         current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         messages = [
-            {
-                "role": "system",
-                "content": (
-                    "You are an expert researcher. Your task is to analyze the original query and search results, "
-                    "then generate targeted questions that explore different aspects and time periods of the topic. "
-                    "Return valid JSON only."
-                ),
-            },
+            {"role": "system", "content": "You are an expert researcher. Your task is to analyze the original query and search results, then generate targeted questions that explore different aspects and time periods of the topic."},
             {"role": "user",
              "content": f"""Original query: {query}
 
@@ -328,8 +128,7 @@ Search results:
 
 Based on these results, the original query, and the current time, generate {num_questions} unique questions. Each question should explore a different aspect or time period of the topic, considering recent developments up to {current_time}.
 
-Return ONLY a JSON object using this exact schema:
-{{"questions": ["<question 1>", "<question 2>"]}}"""}
+Format each question on a new line starting with 'Question: '"""}
         ]
 
         response = await create_chat_completion(
@@ -337,31 +136,20 @@ Return ONLY a JSON object using this exact schema:
             llm_provider=self.researcher.cfg.strategic_llm_provider,
             model=self.researcher.cfg.strategic_llm_model,
             reasoning_effort=ReasoningEfforts.High.value,
-            temperature=0.4,
-            llm_kwargs=self.researcher.cfg.llm_kwargs
+            temperature=0.4
         )
 
-        return parse_follow_up_questions_response(response, num_questions)
+        questions = [q.replace('Question:', '').strip()
+                     for q in response.split('\n')
+                     if q.strip().startswith('Question:')]
+        return questions[:num_questions]
 
     async def process_research_results(self, query: str, context: str, num_learnings: int = 3) -> Dict[str, List[str]]:
         """Process research results to extract learnings and follow-up questions"""
         messages = [
-            {
-                "role": "system",
-                "content": (
-                    "You are an expert researcher analyzing search results. "
-                    "Return valid JSON only."
-                ),
-            },
+            {"role": "system", "content": "You are an expert researcher analyzing search results."},
             {"role": "user",
-             "content": (
-                 f"Given the following research results for the query '{query}', extract key learnings and suggest "
-                 "follow-up questions. For each learning, include a citation to the source URL if available.\n\n"
-                 "Return ONLY a JSON object using this exact schema:\n"
-                 '{"learnings": [{"insight": "<insight>", "sourceUrl": "<url or empty string>"}], '
-                 '"followUpQuestions": ["<question 1>", "<question 2>"]}\n\n'
-                 f"Research results:\n{context}"
-             )}
+             "content": f"Given the following research results for the query '{query}', extract key learnings and suggest follow-up questions. For each learning, include a citation to the source URL if available. Format each learning as 'Learning [source_url]: <insight>' and each question as 'Question: <question>':\n\n{context}"}
         ]
 
         response = await create_chat_completion(
@@ -370,12 +158,43 @@ Return ONLY a JSON object using this exact schema:
             model=self.researcher.cfg.strategic_llm_model,
             temperature=0.4,
             reasoning_effort=ReasoningEfforts.High.value,
-            # Needs headroom for reasoning tokens on reasoning models
-            max_tokens=4000,
-            llm_kwargs=self.researcher.cfg.llm_kwargs
+            max_tokens=1000
         )
 
-        return parse_research_results_response(response, num_learnings)
+        lines = response.split('\n')
+        learnings = []
+        questions = []
+        citations = {}
+
+        for line in lines:
+            line = line.strip()
+            if line.startswith('Learning'):
+                import re
+                url_match = re.search(r'\[(.*?)\]:', line)
+                if url_match:
+                    url = url_match.group(1)
+                    learning = line.split(':', 1)[1].strip()
+                    learnings.append(learning)
+                    citations[learning] = url
+                else:
+                    # Try to find URL in the line itself
+                    url_match = re.search(
+                        r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+', line)
+                    if url_match:
+                        url = url_match.group(0)
+                        learning = line.replace(url, '').replace('Learning:', '').strip()
+                        learnings.append(learning)
+                        citations[learning] = url
+                    else:
+                        learnings.append(line.replace('Learning:', '').strip())
+            elif line.startswith('Question:'):
+                questions.append(line.replace('Question:', '').strip())
+
+        return {
+            'learnings': learnings[:num_learnings],
+            'followUpQuestions': questions[:num_learnings],
+            'citations': citations
+        }
 
     async def deep_research(
             self,
@@ -406,15 +225,6 @@ Return ONLY a JSON object using this exact schema:
         serp_queries = await self.generate_search_queries(query, num_queries=breadth)
         print(f"✅ Generated {len(serp_queries)} queries: {[q['query'] for q in serp_queries]}", flush=True)
         progress.total_queries = len(serp_queries)
-        if not serp_queries:
-            logger.warning("Deep research generated zero search queries; stopping descent.")
-            return {
-                'learnings': all_learnings,
-                'visited_urls': all_visited_urls,
-                'citations': all_citations,
-                'context': all_context,
-                'sources': all_sources,
-            }
 
         all_learnings = learnings.copy()
         all_citations = citations.copy()
@@ -493,40 +303,13 @@ Return ONLY a JSON object using this exact schema:
         if on_progress:
             on_progress(progress)
 
-        # #1579: if every branch at this level failed (bad API key, offline
-        # retriever, etc.), stop instead of endlessly generating follow-ups
-        # from empty goals / empty learnings.
-        if not results:
-            logger.warning(
-                "Deep research produced no successful query results at depth=%s; stopping descent.",
-                depth,
-            )
-            print(
-                f"\nDEEP RESEARCH: no successful results at depth={depth}; stopping to avoid infinite work.",
-                flush=True,
-            )
-            return {
-                'learnings': all_learnings,
-                'visited_urls': all_visited_urls,
-                'citations': all_citations,
-                'context': all_context,
-                'sources': all_sources,
-            }
-
         # Collect all results
         for result in results:
             all_learnings.extend(result['learnings'])
             all_visited_urls.update(result['visited_urls'])
             all_citations.update(result['citations'])
             if result['context']:
-                # Use extend, not append: when CURATE_SOURCES=True, result['context'] is
-                # a List[dict]. append() nests it as a single item, which causes
-                # "\n".join() to crash later with "expected str instance, dict found".
-                ctx = result['context']
-                if isinstance(ctx, list):
-                    all_context.extend(ctx)
-                else:
-                    all_context.append(ctx)
+                all_context.append(result['context'])
             if result['sources']:
                 all_sources.extend(result['sources'])
 
@@ -627,12 +410,7 @@ Return ONLY a JSON object using this exact schema:
         final_context = trim_context_to_word_limit(context_with_citations)
         
         # Set enhanced context and visited URLs
-        self.researcher.context = "\n".join(
-            item if isinstance(item, str)
-            else item.get("Content", str(item)) if isinstance(item, dict)
-            else str(item)
-            for item in final_context
-        )
+        self.researcher.context = "\n".join(final_context)
         self.researcher.visited_urls = results['visited_urls']
 
         # Set research sources

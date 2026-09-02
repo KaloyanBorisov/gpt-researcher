@@ -21,13 +21,13 @@ The config JSON should follow the format/keys in the default config. Below is a 
   "RETRIEVER": "tavily",
   "EMBEDDING": "openai:text-embedding-3-small",
   "SIMILARITY_THRESHOLD": 0.42,
-  "FAST_LLM": "openai:gpt-5.4-mini",
-  "SMART_LLM": "openai:gpt-5.4",
-  "STRATEGIC_LLM": "openai:gpt-5.4",
+  "FAST_LLM": "openai:gpt-4o-mini",
+  "SMART_LLM": "openai:gpt-4.1",
+  "STRATEGIC_LLM": "openai:o4-mini",
   "LANGUAGE": "english",
   "CURATE_SOURCES": false,
-  "FAST_TOKEN_LIMIT": 3000,
-  "SMART_TOKEN_LIMIT": 6000,
+  "FAST_TOKEN_LIMIT": 2000,
+  "SMART_TOKEN_LIMIT": 4000,
   "STRATEGIC_TOKEN_LIMIT": 4000,
   "BROWSE_CHUNK_MAX_LENGTH": 8192,
   "SUMMARY_TOKEN_LIMIT": 700,
@@ -50,36 +50,17 @@ python gpt_researcher/main.py --config_path my_config.json
 
 Below is a list of current supported options:
 
-- **`RETRIEVER`**: Search engine or research retriever used for retrieving sources. Defaults to `tavily`. Options include `tavily`, `duckduckgo`, `bing`, `brave`, `google`, `searchapi`, `serper`, `serpapi`, `searx`, `arxiv`, `openalex`, `semantic_scholar`, `pubmed_central`, `exa`, `crw`, `groundroute`, `bocha`, `xquik`, `custom`, and `mcp`. You can also combine retrievers with commas, such as `tavily,openalex,semantic_scholar`. [Check here](https://github.com/assafelovic/gpt-researcher/tree/master/gpt_researcher/retrievers) for supported retrievers
+- **`RETRIEVER`**: Web search engine used for retrieving sources. Defaults to `tavily`. Options: `duckduckgo`, `bing`, `google`, `searchapi`, `serper`, `searx`. [Check here](https://github.com/assafelovic/gpt-researcher/tree/master/gpt_researcher/retrievers) for supported retrievers
 - **`EMBEDDING`**: Embedding model. Defaults to `openai:text-embedding-3-small`. Options: `ollama`, `huggingface`, `azure_openai`, `custom`.
 - **`SIMILARITY_THRESHOLD`**: Threshold value for similarity comparison when processing documents. Defaults to `0.42`.
-- **`FAST_LLM`**: Model name for fast LLM operations such summaries. Defaults to `openai:gpt-5.4-mini`.
-- **`SMART_LLM`**: Model name for smart operations like generating research reports and reasoning. Defaults to `openai:gpt-5.4`.
-- **`STRATEGIC_LLM`**: Model name for strategic operations like generating research plans and strategies. Defaults to `openai:gpt-5.4`.
+- **`FAST_LLM`**: Model name for fast LLM operations such summaries. Defaults to `openai:gpt-4o-mini`.
+- **`SMART_LLM`**: Model name for smart operations like generating research reports and reasoning. Defaults to `openai:gpt-5`.
+- **`STRATEGIC_LLM`**: Model name for strategic operations like generating research plans and strategies. Defaults to `openai:gpt-5-mini`.
 - **`LANGUAGE`**: Language to be used for the final research report. Defaults to `english`.
 - **`CURATE_SOURCES`**: Whether to curate sources for research. This step adds an LLM run which may increase costs and total run time but improves quality of source selection. Defaults to `False`.
-- **`FAST_TOKEN_LIMIT`**: Maximum token limit for fast LLM responses. Defaults to `3000`.
-- **`SMART_TOKEN_LIMIT`**: Maximum token limit for smart LLM responses. Defaults to `6000`.
+- **`FAST_TOKEN_LIMIT`**: Maximum token limit for fast LLM responses. Defaults to `2000`.
+- **`SMART_TOKEN_LIMIT`**: Maximum token limit for smart LLM responses. Defaults to `4000`.
 - **`STRATEGIC_TOKEN_LIMIT`**: Maximum token limit for strategic LLM responses. Defaults to `4000`.
-
-#### Recommended values for modern long-output models
-
-The default token limits are calibrated for GPT-4o-class models
-(16k max output). For models with larger output capacity, increase
-these limits to avoid truncated reports:
-
-| Model family            | Max output | Recommended SMART_TOKEN_LIMIT |
-|-------------------------|-----------:|------------------------------:|
-| GPT-4o / GPT-4.1        |        16k |                          8000 |
-| Claude Haiku 4.5        |        64k |                         16000 |
-| Claude Sonnet 4.6       |        64k |                         16000 |
-| Claude Opus 4.7         |       128k |                         32000 |
-| GPT-5 family            |       128k |                         32000 |
-
-Apply proportional values to `FAST_TOKEN_LIMIT` and
-`STRATEGIC_TOKEN_LIMIT` if you use distinct models for those roles.
-The hard upper bound is 200k (sanity guard against typos).
-
 - **`BROWSE_CHUNK_MAX_LENGTH`**: Maximum length of text chunks to browse in web sources. Defaults to `8192`.
 - **`SUMMARY_TOKEN_LIMIT`**: Maximum token limit for generating summaries. Defaults to `700`.
 - **`TEMPERATURE`**: Sampling temperature for LLM responses, typically between 0 and 1. A higher value results in more randomness and creativity, while a lower value results in more focused and deterministic responses. Defaults to `0.4`.
@@ -118,17 +99,10 @@ For academic or highly specialized research, consider increasing both breadth an
 To change the default configurations, you can simply add env variables to your `.env` file as named above or export manually in your local project directory.
 
 For example, to manually change the search engine and report format:
-
 ```bash
 export RETRIEVER=bing
 export REPORT_FORMAT=IEEE
 ```
-
-For academic literature reviews, you can combine web and scholarly retrievers:
-
-```bash
-export RETRIEVER=tavily,openalex,semantic_scholar
-```
-
 Please note that you might need to export additional env vars and obtain API keys for other supported search retrievers and LLM providers. Please follow your console logs for further assistance.
 To learn more about additional LLM support you can check out the docs [here](/docs/gpt-researcher/llms/llms).
+

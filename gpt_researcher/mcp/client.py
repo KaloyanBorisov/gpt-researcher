@@ -47,15 +47,6 @@ class MCPClientManager:
         server_configs = {}
         
         for i, config in enumerate(self.mcp_configs):
-            # GPT Researcher MCP configs are dicts; tolerate list/json drift so
-            # a single bad entry cannot AttributeError the whole conversion.
-            if not isinstance(config, dict):
-                logger.warning(
-                    "Skipping MCP server config at index %s: expected dict, got %s",
-                    i,
-                    type(config).__name__,
-                )
-                continue
             # Generate server name
             server_name = config.get("name", f"mcp_server_{i+1}")
             
@@ -82,7 +73,7 @@ class MCPClientManager:
                 connection_type = config.get("connection_type", "stdio")
                 server_config["transport"] = connection_type
             
-            if server_config.get("transport") in ["streamable_http", "http", "websocket"]:
+            if server_config.get("connection_type") in ["streamable_http", "http"]:
                 connection_headers = config.get("connection_headers")
                 if connection_headers and isinstance(connection_headers, dict):
                     server_config["headers"] = connection_headers

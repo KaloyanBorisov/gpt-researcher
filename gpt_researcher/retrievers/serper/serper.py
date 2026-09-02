@@ -104,36 +104,27 @@ class SerperSearch():
 
         resp = requests.request("POST", url, timeout=10, headers=headers, data=data)
 
-        # Preprocess the results. Always return a list so callers (which do
-        # `len(...)` / iterate over the result) never receive None.
+        # Preprocess the results
         if resp is None:
-            return []
+            return
         try:
             search_results = json.loads(resp.text)
         except Exception:
-            return []
-        if search_results is None or not isinstance(search_results, dict):
-            return []
+            return
+        if search_results is None:
+            return
 
-        results = search_results.get("organic") or []
-        if not isinstance(results, list):
-            return []
+        results = search_results.get("organic", [])
         search_results = []
 
         # Normalize the results to match the format of the other search APIs
         # Excluded sites should already be filtered out by the query parameters
         for result in results:
-            if not isinstance(result, dict):
-                continue
-            href = result.get("link") or result.get("url") or ""
-            if not href:
-                continue
-            search_results.append(
-                {
-                    "title": result.get("title") or "",
-                    "href": href,
-                    "body": result.get("snippet") or result.get("body") or "",
-                }
-            )
+            search_result = {
+                "title": result["title"],
+                "href": result["link"],
+                "body": result["snippet"],
+            }
+            search_results.append(search_result)
 
         return search_results

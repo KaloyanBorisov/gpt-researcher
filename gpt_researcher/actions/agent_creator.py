@@ -55,16 +55,7 @@ async def choose_agent(
             **kwargs
         )
 
-        # Prefer json_repair so fenced / lightly broken LLM JSON succeeds
-        # on the hot path instead of always falling through exception handling.
-        try:
-            agent_dict = json_repair.loads(response) if response is not None else None
-        except Exception:
-            agent_dict = None
-        if not isinstance(agent_dict, dict):
-            agent_dict = json.loads(response)
-        if not isinstance(agent_dict, dict):
-            raise ValueError("agent JSON was not an object")
+        agent_dict = json.loads(response)
         return agent_dict["server"], agent_dict["agent_role_prompt"]
 
     except Exception as e:
@@ -85,10 +76,9 @@ async def handle_json_error(response: str | None):
         if all parsing attempts fail.
     """
     try:
-        agent_dict = json_repair.loads(response) if response is not None else None
-        recovered = _agent_pair_from_payload(agent_dict)
-        if recovered is not None:
-            return recovered
+        agent_dict = json_repair.loads(response)
+        if agent_dict.get("server") and agent_dict.get("agent_role_prompt"):
+            return agent_dict["server"], agent_dict["agent_role_prompt"]
     except Exception as e:
         error_type = type(e).__name__
         error_msg = str(e)
@@ -103,9 +93,7 @@ async def handle_json_error(response: str | None):
     if json_string:
         try:
             json_data = json.loads(json_string)
-            recovered = _agent_pair_from_payload(json_data)
-            if recovered is not None:
-                return recovered
+            return json_data["server"], json_data["agent_role_prompt"]
         except json.JSONDecodeError as e:
             logger.warning(
                 f"Failed to decode JSON from regex extraction: {str(e)}",
@@ -117,17 +105,6 @@ async def handle_json_error(response: str | None):
         "You are an AI critical thinker research assistant. Your sole purpose is to write well written, "
         "critically acclaimed, objective and structured reports on given text."
     )
-
-
-def _agent_pair_from_payload(payload):
-    """Return (server, agent_role_prompt) only for complete dict payloads."""
-    if not isinstance(payload, dict):
-        return None
-    server = payload.get("server")
-    role = payload.get("agent_role_prompt")
-    if server and role:
-        return server, role
-    return None
 
 
 def extract_json_with_regex(response: str | None) -> str | None:
@@ -143,12 +120,7 @@ def extract_json_with_regex(response: str | None) -> str | None:
     """
     if not response:
         return None
-    # Greedy ``{.*}`` so the match spans from the first ``{`` to the LAST ``}``
-    # in the response, capturing the whole object. A non-greedy ``{.*?}``
-    # stopped at the first ``}``, truncating any object with more than one
-    # key or with a ``}`` inside a string value (e.g. an agent_role_prompt
-    # mentioning "{markets}") into invalid JSON.
-    json_match = re.search(r"{.*}", response, re.DOTALL)
+    json_match = re.search(r"{.*?}", response, re.DOTALL)
     if json_match:
         return json_match.group(0)
     return None

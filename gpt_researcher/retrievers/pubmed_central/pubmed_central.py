@@ -9,10 +9,6 @@ class PubMedCentralSearch:
     PubMed Central Full-Text Search
     """
 
-    # PubMed Central returns full article text inline, so there is nothing
-    # left to scrape.
-    requires_scraping = False
-
     def __init__(self, query: str, query_domains=None):
         self.base_search_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
         self.base_fetch_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
@@ -65,17 +61,8 @@ class PubMedCentralSearch:
             response = requests.get(self.base_search_url, params=search_params)
             response.raise_for_status()
             data = response.json()
-            if not isinstance(data, dict):
-                return []
-
-            # Error / unexpected envelopes may set esearchresult to null,
-            # a list, or omit idlist. Only treat a real list as success.
-            esearch = data.get("esearchresult")
-            if not isinstance(esearch, dict):
-                return []
-            id_list = esearch.get("idlist") or []
-            if not isinstance(id_list, list):
-                return []
+            
+            id_list = data.get('esearchresult', {}).get('idlist', [])
             print(f"Found {len(id_list)} articles with full text available")
             return id_list
             
@@ -103,11 +90,9 @@ class PubMedCentralSearch:
             try:
                 root = ET.fromstring(response.text)
                 
-                # Extract title (itertext so nested formatting tags are included)
+                # Extract title
                 title = root.find('.//article-title')
-                title_text = (
-                    " ".join(title.itertext()).strip() if title is not None else ""
-                )
+                title_text = title.text if title is not None else ""
                 
                 # Extract abstract
                 abstract = root.find('.//abstract')
@@ -127,11 +112,9 @@ class PubMedCentralSearch:
                     url = f"https://www.ncbi.nlm.nih.gov/pmc/articles/PMC{article_id}/"
                 
                 return {
-                    "href": url,
                     "url": url,
-                    "body": full_content,
                     "raw_content": full_content,
-                    "title": title_text
+                    "title": title_text  # Extra field for convenience
                 }
                 
             except ET.ParseError as e:
@@ -140,7 +123,7 @@ class PubMedCentralSearch:
         except requests.RequestException as e:
             return None
 
-    def search(self, max_results: int = 5) -> List[Dict[str, Any]]:
+    def search(self, max_results: int = 5) -> Optional[List[Dict[str, Any]]]:
         """
         Performs the search and retrieves full text content.
 
@@ -154,13 +137,10 @@ class PubMedCentralSearch:
               ...
             ]
         """
-        # Step 1: Search for article IDs. Always return a list (never None):
-        # callers such as actions.query_processing.get_search_results are typed
-        # -> List[Dict] and skills.researcher does len(search_results), which
-        # raises TypeError on None.
+        # Step 1: Search for article IDs
         article_ids = self._search_articles(max_results)
         if not article_ids:
-            return []
+            return None
         
         # Step 2: Fetch full text for each article
         results = []

@@ -40,44 +40,19 @@ class BoChaSearch():
             "count": max_results
         }
 
-        try:
-            response = requests.post(url, headers=headers, json=data, timeout=10)
-            response.raise_for_status()
-            json_response = response.json()
-        except (requests.RequestException, ValueError) as e:
-            logging.getLogger(__name__).warning(
-                f"Error: {e}. Failed fetching sources. Resulting in empty response."
-            )
-            return []
+        response = requests.post(url, headers=headers, json=data)
 
-        # The BoCha response shape is data.webPages.value; any of these may be
-        # missing on an error/empty payload, so walk it defensively rather than
-        # KeyError-ing the whole research run.
-        results = (
-            ((json_response or {}).get("data") or {}).get("webPages") or {}
-        ).get("value") or []
-        if not isinstance(results, list):
-            return []
-
+        json_response = response.json()
+        results = json_response["data"]["webPages"]["value"]
         search_results = []
 
-        if not isinstance(results, list):
-            return []
-
-        # Normalize the results to match the format of the other search APIs.
-        # Skip non-dict rows / empty URLs; default missing fields to "".
+        # Normalize the results to match the format of the other search APIs
         for result in results:
-            if not isinstance(result, dict):
-                continue
-            href = result.get("url") or ""
-            if not href:
-                continue
-            search_results.append(
-                {
-                    "title": result.get("name") or "",
-                    "href": href,
-                    "body": result.get("snippet") or "",
-                }
-            )
+            search_result = {
+                "title": result["name"],
+                "href": result["url"],
+                "body": result["snippet"],
+            }
+            search_results.append(search_result)
 
         return search_results

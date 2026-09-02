@@ -8,12 +8,10 @@ import asyncio
 import json
 import logging
 import re
-
-import json_repair
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..actions.utils import stream_output
-from ..llm_provider.image import ImageGeneratorProvider, ModelsLabImageGeneratorProvider
+from ..llm_provider.image import ImageGeneratorProvider
 from ..utils.llm import create_chat_completion
 
 logger = logging.getLogger(__name__)
@@ -49,25 +47,21 @@ class ImageGenerator:
     
     def _init_provider(self):
         """Initialize the image generation provider from config."""
-        try:
-            enabled = getattr(self.cfg, 'IMAGE_GENERATION_ENABLED', False)
-            if not enabled:
-                return
-            provider_name = getattr(self.cfg, 'IMAGE_GENERATION_PROVIDER', 'google')
-            model = getattr(self.cfg, 'IMAGE_GENERATION_MODEL', None)
-            if provider_name == 'modelslab':
-                provider = ModelsLabImageGeneratorProvider(model_id=model)
-            else:
-                provider = ImageGeneratorProvider(model_name=model)
-            if provider.is_available():
-                self.image_provider = provider
-                logger.info(f"Image generation provider initialized: {provider_name}")
-            else:
-                logger.warning(f"Image generation provider '{provider_name}' not available (missing API key?)")
-        except Exception as e:
-            logger.error(f"Failed to initialize image provider: {e}")
-            self.image_provider = None
-
+        model = getattr(self.cfg, 'image_generation_model', None)
+        enabled = getattr(self.cfg, 'image_generation_enabled', False)
+        
+        if model and enabled:
+            try:
+                self.image_provider = ImageGeneratorProvider(model_name=model)
+                if self.image_provider.is_available():
+                    logger.info(f"Image generation enabled with model: {model}")
+                else:
+                    logger.warning("Image generation provider not available (missing API key?)")
+                    self.image_provider = None
+            except Exception as e:
+                logger.error(f"Failed to initialize image provider: {e}")
+                self.image_provider = None
+    
     def is_enabled(self) -> bool:
         """Check if image generation is enabled and available.
         
@@ -240,17 +234,20 @@ Return 2-3 visualization concepts as a JSON array:"""
                 ],
                 temperature=0.4,
                 llm_provider=self.cfg.fast_llm_provider,
-                max_tokens=4000,  # headroom for reasoning tokens on reasoning models
+                max_tokens=1000,
                 llm_kwargs=self.cfg.llm_kwargs,
                 cost_callback=self.researcher.add_costs,
             )
             
-            # Parse JSON response (models often fence/preamble JSON; match deep_research)
-            concepts = json_repair.loads(response)
-            if not isinstance(concepts, list):
-                logger.error("Image planning response was not a JSON array")
-                return []
-
+            # Parse JSON response
+            response = response.strip()
+            # Remove markdown code blocks if present
+            if response.startswith("```"):
+                response = re.sub(r'^```(?:json)?\n?', '', response)
+                response = re.sub(r'\n?```$', '', response)
+            
+            concepts = json.loads(response)
+            
             # Validate and limit to max_images
             valid_concepts = []
             for concept in concepts[:self.max_images]:
@@ -308,7 +305,7 @@ Return 2-3 visualization concepts as a JSON array:"""
                 llm_provider=self.cfg.fast_llm_provider,
                 stream=False,
                 websocket=None,
-                max_tokens=4000,  # headroom for reasoning tokens on reasoning models
+                max_tokens=1500,
                 llm_kwargs=self.cfg.llm_kwargs,
             )
             
@@ -434,20 +431,18 @@ Return ONLY the JSON, no additional text."""
             List of image suggestion dictionaries.
         """
         try:
-            data = json_repair.loads(response)
-            if not isinstance(data, dict):
-                logger.warning("No JSON object found in analysis response")
+            # Try to extract JSON from the response
+            json_match = re.search(r'\{[\s\S]*\}', response)
+            if not json_match:
+                logger.warning("No JSON found in analysis response")
                 return []
-
-            suggestions = data.get("suggestions", []) or []
-            if not isinstance(suggestions, list):
-                return []
-
+            
+            data = json.loads(json_match.group())
+            suggestions = data.get("suggestions", [])
+            
             # Enrich with section data
             enriched = []
             for s in suggestions:
-                if not isinstance(s, dict):
-                    continue
                 section_num = s.get("section_number", 0) - 1  # Convert to 0-indexed
                 if 0 <= section_num < len(sections):
                     section = sections[section_num]
@@ -458,10 +453,10 @@ Return ONLY the JSON, no additional text."""
                         "reason": s.get("reason", ""),
                         "insert_after_line": section["start_line"],
                     })
-
+            
             return enriched
-
-        except Exception as e:
+            
+        except json.JSONDecodeError as e:
             logger.error(f"Failed to parse analysis JSON: {e}")
             return []
     

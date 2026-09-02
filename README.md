@@ -22,7 +22,7 @@
 
 # 🔎 GPT Researcher
 
-**GPT Researcher the first open deep research agent designed for both web and local research on any given task.** 
+**GPT Researcher is an open deep research agent designed for both web and local research on any given task.** 
 
 The agent produces detailed, factual, and unbiased research reports with citations. GPT Researcher provides a full suite of customization options to create tailor made and domain specific research agents. Inspired by the recent [Plan-and-Solve](https://arxiv.org/abs/2305.04091) and [RAG](https://arxiv.org/abs/2005.11401) papers, GPT Researcher addresses misinformation, speed, determinism, and reliability by offering stable performance and increased speed through parallelized agent work.
 
@@ -51,88 +51,91 @@ npx skills add assafelovic/gpt-researcher
 
 Once installed, Claude can leverage GPT Researcher's deep research capabilities directly within your conversations.
 
-## Architecture
+## 🏛️ Microservices Architecture
 
-The core idea is to utilize 'planner' and 'execution' agents. The planner generates research questions, while the execution agents gather relevant information. The publisher then aggregates all findings into a comprehensive report.
+GPT Researcher is built as a modular, containerized microservices architecture communicating via REST APIs and an asynchronous **Redis Pub/Sub Event Bus**:
 
-<div align="center">
-<img align="center" height="600" src="https://github.com/assafelovic/gpt-researcher/assets/13554167/4ac896fd-63ab-4b77-9688-ff62aafcc527">
-</div>
+```mermaid
+graph TD
+    UI["Next.js Web UI<br>Port 3000"]
+    GW["API Gateway<br>Port 8000 (FastAPI + WebSockets)"]
+    BUS[("Redis Pub/Sub<br>Port 6379")]
+    ORCH["Research Orchestrator<br>Port 8001 (Multi-Agent Engine)"]
+    SCRAP["Scraper & Search Service<br>Port 8002 (Playwright / BS4)"]
+    DOC["Document Service<br>Port 8003 (Vector & Local RAG)"]
+    EXP["Export Service<br>Port 8004 (PDF / DOCX / Markdown)"]
 
-Steps:
-* Create a task-specific agent based on a research query.
-* Generate questions that collectively form an objective opinion on the task.
-* Use a crawler agent for gathering information for each question.
-* Summarize and source-track each resource.
-* Filter and aggregate summaries into a final research report.
+    UI -->|REST / WebSocket /ws| GW
+    GW <-->|Event Stream| BUS
+    GW -->|/research| ORCH
+    GW -->|/upload, /query| DOC
+    GW -->|/export| EXP
+    ORCH <-->|Publish Events| BUS
+    ORCH -->|/search, /scrape| SCRAP
+    ORCH -->|/query| DOC
+    ORCH -->|/export| EXP
+```
 
-## Tutorials
- - [How it Works](https://docs.gptr.dev/blog/building-gpt-researcher)
- - [How to Install](https://www.loom.com/share/04ebffb6ed2a4520a27c3e3addcdde20?sid=da1848e8-b1f1-42d1-93c3-5b0b9c3b24ea)
- - [Live Demo](https://www.loom.com/share/6a3385db4e8747a1913dd85a7834846f?sid=a740fd5b-2aa3-457e-8fb7-86976f59f9b8)
+### Microservices Breakdown
 
-## Features
+| Service | Port | Directory | Description |
+|---|---|---|---|
+| **Next.js Web UI** | `3000` | [`frontend/nextjs`](./frontend/nextjs) | Modern Next.js UI with real-time streaming, chat, and report downloads |
+| **API Gateway** | `8000` | [`services/api_gateway`](./services/api_gateway) | Public FastAPI reverse proxy, WebSocket multiplexer, report storage, and chat |
+| **Research Orchestrator** | `8001` | [`services/research_orchestrator`](./services/research_orchestrator) | Multi-agent research planner, query execution, and report synthesizer |
+| **Scraper Service** | `8002` | [`services/scraper_service`](./services/scraper_service) | Headless web scraping (Playwright/BS4) and search retrievers (Tavily, DDG, etc.) |
+| **Document Service** | `8003` | [`services/document_service`](./services/document_service) | Document parser (PDF, DOCX, TXT) and vector search similarity engine |
+| **Export Service** | `8004` | [`services/export_service`](./services/export_service) | High-fidelity PDF (WeasyPrint), Word (DOCX), and Markdown document generator |
+| **Redis Event Bus** | `6379` | `redis:7-alpine` | Asynchronous pub/sub event broker for live agent progress streaming |
 
-- 📝 Generate detailed research reports using web and local documents.
-- 🖼️ Smart image scraping and filtering for reports.
-- 🍌 **AI-generated inline images** using Google Gemini (Nano Banana) for visual illustrations.
-- 📜 Generate detailed reports exceeding 2,000 words.
-- 🌐 Aggregate over 20 sources for objective conclusions.
-- 🖥️ Frontend available in lightweight (HTML/CSS/JS) and production-ready (NextJS + Tailwind) versions.
-- 🔍 JavaScript-enabled web scraping.
-- 📂 Maintains memory and context throughout research.
-- 📄 Export reports to PDF, Word, and other formats.
+---
 
-## 📖 Documentation
+## ⚙️ Quickstart with Docker Compose
 
-See the [Documentation](https://docs.gptr.dev/docs/gpt-researcher/getting-started) for:
-- Installation and setup guides
-- Configuration and customization options
-- How-To examples
-- Full API references
+The easiest way to run the entire microservices stack is with Docker Compose:
 
-## ⚙️ Getting Started
+### 1. Clone & Configure Environment
 
-### Installation
+```bash
+git clone https://github.com/assafelovic/gpt-researcher.git
+cd gpt-researcher
+cp .env.example .env
+```
 
-1. Install Python 3.11 or later. [Guide](https://www.tutorialsteacher.com/python/install-python).
-2. Clone the project and navigate to the directory:
+Add your API keys to `.env`:
+```env
+OPENAI_API_KEY=your_openai_api_key
+TAVILY_API_KEY=your_tavily_api_key
+```
 
-    ```bash
-    git clone https://github.com/assafelovic/gpt-researcher.git
-    cd gpt-researcher
-    ```
+### 2. Start the Microservices Stack
 
-3. Set up API keys by exporting them or storing them in a `.env` file.
+```bash
+docker compose up -d --build
+```
 
-    ```bash
-    export OPENAI_API_KEY={Your OpenAI API Key here}
-    export TAVILY_API_KEY={Your Tavily API Key here}
-    ```
+Access the services:
+- 🌐 **Web UI**: [http://localhost:3000](http://localhost:3000)
+- 🔌 **API Gateway & Swagger Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
+- 🔍 **Scraper Service Docs**: [http://localhost:8002/docs](http://localhost:8002/docs)
 
-    (Optional) For enhanced tracing and observability, you can also set:
-    
-    ```bash
-    # export LANGCHAIN_TRACING_V2=true
-    # export LANGCHAIN_API_KEY={Your LangChain API Key here}
-    ```
+### 3. Run Container Composition Tests
 
-    For custom OpenAI-compatible APIs (e.g., local models, other providers), you can also set:
-    
-    ```bash
-    export OPENAI_BASE_URL={Your custom API base URL here}
-    ```
+To run the full suite of live container-to-container integration tests:
 
-4. Install dependencies and start the server:
+```bash
+docker compose --profile test run --rm test-runner
+```
 
-    ```bash
-    pip install -r requirements.txt
-    python -m uvicorn main:app --reload
-    ```
+---
 
-Visit [http://localhost:8000](http://localhost:8000) to start.
+## 💻 CLI & Python SDK
 
-For other setups (e.g., Poetry or virtual environments), check the [Getting Started page](https://docs.gptr.dev/docs/gpt-researcher/getting-started).
+You can also run research directly via the standalone CLI or the Python SDK:
+
+```bash
+python cli.py "What are the latest advancements in quantum computing?"
+```
 
 ## Run as PIP package
 ```bash
@@ -298,24 +301,6 @@ To enable tracing:
    ```
 2. Run your research tasks as usual. All LangGraph-based agent interactions will be automatically traced and visualized in your LangSmith dashboard.
 
-#### Monocle Tracing
-
-GPT Researcher also supports [Monocle](https://github.com/monocle2ai/monocle), an OpenTelemetry-based tracer for agentic applications. It records each run end-to-end: LLM calls, agent steps, and tool invocations, with their inputs, outputs, timings, and token counts.
-
-Monocle is an opt-in extra and is off by default. Install it, then add the following to your `.env` file:
-
-```bash
-pip install "gpt-researcher[monocle]"
-```
-
-```bash
-MONOCLE_TRACING=true
-MONOCLE_EXPORTERS=file          # file, console, okahu, s3, blob, gcs (default: file)
-OKAHU_API_KEY=okh_xxxxxxxx      # required only for the `okahu` exporter
-```
-
-Each run writes one trace file to `.monocle/`; open it in the [Monocle VS Code extension](https://marketplace.visualstudio.com/items?itemName=OkahuAI.monocle-apptrace). Connect to [Okahu](https://www.okahu.ai) to analyze traces across runs (via the `okahu` exporter).
-
 ## 🖥️ Frontend Applications
 
 GPT-Researcher now features an enhanced frontend to improve the user experience and streamline the research process. The frontend offers:
@@ -354,11 +339,11 @@ Our view on unbiased research claims:
 ---
 
 <p align="center">
-<a href="https://star-history.dera.page/#assafelovic/gpt-researcher">
+<a href="https://star-history.com/#assafelovic/gpt-researcher">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://star-history.dera.page/svg?repos=assafelovic/gpt-researcher&type=Date&theme=dark" />
-    <source media="(prefers-color-scheme: light)" srcset="https://star-history.dera.page/svg?repos=assafelovic/gpt-researcher&type=Date" />
-    <img alt="Star History Chart" src="https://star-history.dera.page/svg?repos=assafelovic/gpt-researcher&type=Date" />
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=assafelovic/gpt-researcher&type=Date&theme=dark" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=assafelovic/gpt-researcher&type=Date" />
+    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=assafelovic/gpt-researcher&type=Date" />
   </picture>
 </a>
 </p>

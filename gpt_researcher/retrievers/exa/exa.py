@@ -51,29 +51,18 @@ class ExaSearch:
         Returns:
             A list of search results.
         """
-        try:
-            results = self.client.search(
-                self.query,
-                type=search_type,
-                use_autoprompt=use_autoprompt,
-                num_results=max_results,
-                include_domains=self.query_domains,
-                **filters
-            )
-        except Exception as e:
-            print(f"Error: {e}. Failed fetching sources from Exa. Empty response.")
-            return []
+        results = self.client.search(
+            self.query,
+            type=search_type,
+            use_autoprompt=use_autoprompt,
+            num_results=max_results,
+            include_domains=self.query_domains,
+            **filters
+        )
 
-        search_response = []
-        rows = getattr(results, "results", None) or []
-        if not isinstance(rows, list):
-            return []
-        for result in rows:
-            href = getattr(result, "url", None)
-            if not href:
-                continue
-            body = getattr(result, "text", None) or getattr(result, "summary", None) or ""
-            search_response.append({"href": href, "body": body})
+        search_response = [
+            {"href": result.url, "body": result.text} for result in results.results
+        ]
         return search_response
 
     def find_similar(self, url, exclude_source_domain=False, **filters):
@@ -90,13 +79,9 @@ class ExaSearch:
             url, exclude_source_domain=exclude_source_domain, **filters
         )
 
-        similar_response = []
-        for result in results.results or []:
-            href = getattr(result, "url", None)
-            if not href:
-                continue
-            body = getattr(result, "text", None) or getattr(result, "summary", None) or ""
-            similar_response.append({"href": href, "body": body})
+        similar_response = [
+            {"href": result.url, "body": result.text} for result in results.results
+        ]
         return similar_response
 
     def get_contents(self, ids, **options):
@@ -110,11 +95,7 @@ class ExaSearch:
         """
         results = self.client.get_contents(ids, **options)
 
-        contents_response = []
-        for result in results.results or []:
-            result_id = getattr(result, "id", None)
-            if result_id is None:
-                continue
-            content = getattr(result, "text", None) or ""
-            contents_response.append({"id": result_id, "content": content})
+        contents_response = [
+            {"id": result.id, "content": result.text} for result in results.results
+        ]
         return contents_response

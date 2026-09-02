@@ -118,7 +118,6 @@
       items: [
         'gpt-researcher/multi_agents/ag2',
         'gpt-researcher/multi_agents/langgraph',
-        'gpt-researcher/multi_agents/deepagents',
         ]
     },
     {

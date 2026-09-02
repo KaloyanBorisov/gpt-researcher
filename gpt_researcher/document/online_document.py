@@ -1,8 +1,6 @@
 import os
 import aiohttp
 import tempfile
-
-from gpt_researcher.utils.url_security import UnsafeURLError, validate_url
 from langchain_community.document_loaders import (
     PyMuPDFLoader,
     TextLoader,
@@ -37,13 +35,6 @@ class OnlineDocumentLoader:
 
     async def _download_and_process(self, url: str) -> list:
         try:
-            # Reject SSRF / local-file targets before issuing the request.
-            try:
-                validate_url(url)
-            except UnsafeURLError as e:
-                print(f"Skipping unsafe document URL {url}: {e}")
-                return []
-
             headers = {
                 "User-Agent": "Mozilla/5.0"
             }
@@ -97,8 +88,4 @@ class OnlineDocumentLoader:
 
     @staticmethod
     def _get_extension(url: str) -> str:
-        # Lower-case the extension so loader lookup (whose keys are lower-case,
-        # e.g. "pdf"/"docx") matches URLs that use upper-case extensions like
-        # "report.PDF" or "doc.DOCX". The leading "?" split drops query strings
-        # (signed CDN/S3 URLs) before extracting the suffix.
-        return os.path.splitext(url.split("?")[0])[1].lower()
+        return os.path.splitext(url.split("?")[0])[1]

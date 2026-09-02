@@ -41,16 +41,15 @@ class PyMuPDFScraper:
         """
         try:
             if self.is_url():
-                http = self.session or requests
                 try:
-                    response = http.get(self.link, timeout=(5, 30), stream=True)
+                    response = requests.get(self.link, timeout=(5, 30), stream=True)
                     response.raise_for_status()
                 except requests.exceptions.SSLError:
                     import logging
                     logging.getLogger(__name__).warning(
                         f"SSL verification failed for {self.link}, retrying without verification"
                     )
-                    response = http.get(self.link, timeout=(5, 30), stream=True, verify=False)
+                    response = requests.get(self.link, timeout=(5, 30), stream=True, verify=False)
                     response.raise_for_status()
 
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
@@ -58,16 +57,10 @@ class PyMuPDFScraper:
                     for chunk in response.iter_content(chunk_size=8192):
                         temp_file.write(chunk)  # Write the downloaded content to the temporary file
 
-                # Always clean up the downloaded temp file, even if loading fails
-                # (PyMuPDFLoader.load() can raise on a malformed/partial PDF).
-                try:
-                    loader = PyMuPDFLoader(temp_filename)
-                    doc = loader.load()
-                finally:
-                    try:
-                        os.remove(temp_filename)
-                    except OSError:
-                        pass
+                loader = PyMuPDFLoader(temp_filename)
+                doc = loader.load()
+
+                os.remove(temp_filename)
             else:
                 loader = PyMuPDFLoader(self.link)
                 doc = loader.load()

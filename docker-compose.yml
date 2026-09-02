@@ -1,77 +1,348 @@
 services:
-  gpt-researcher:
-    pull_policy: build
-    image: gptresearcher/gpt-researcher
-    build: ./
-    environment: 
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      OPENAI_BASE_URL: ${OPENAI_BASE_URL}
-      TAVILY_API_KEY: ${TAVILY_API_KEY}
-      LANGCHAIN_API_KEY: ${LANGCHAIN_API_KEY}
-      LOGGING_LEVEL: INFO
-      # Image generation (optional - set to enable inline images in reports)
-      GOOGLE_API_KEY: ${GOOGLE_API_KEY}
-      IMAGE_GENERATION_ENABLED: ${IMAGE_GENERATION_ENABLED:-false}
-      IMAGE_GENERATION_MODEL: ${IMAGE_GENERATION_MODEL:-gemini-2.0-flash-preview-image-generation}
-      IMAGE_GENERATION_MAX_IMAGES: ${IMAGE_GENERATION_MAX_IMAGES:-3}
-    volumes:
-      - ${PWD}/my-docs:/usr/src/app/my-docs:rw
-      - ${PWD}/outputs:/usr/src/app/outputs:rw
-      - ${PWD}/logs:/usr/src/app/logs:rw
-    user: root
-    restart: always
+  redis:
+    image: redis:7-alpine
+    container_name: gptr-redis
     ports:
-      - 8000:8000
-      
-  gptr-nextjs:
-    pull_policy: build
-    image: gptresearcher/gptr-nextjs
-    stdin_open: true
-    environment:
-      CHOKIDAR_USEPOLLING: "true"
-      LOGGING_LEVEL: INFO
-      NEXT_PUBLIC_GA_MEASUREMENT_ID: ${NEXT_PUBLIC_GA_MEASUREMENT_ID}
-      NEXT_PUBLIC_GPTR_API_URL: ${NEXT_PUBLIC_GPTR_API_URL}
-    build:
-      dockerfile: Dockerfile.dev
-      context: frontend/nextjs
-    volumes:
-      - /app/node_modules
-      - ./frontend/nextjs:/app
-      - ./frontend/nextjs/.next:/app/.next
-      - ./outputs:/app/outputs
-    restart: always
-    ports:
-      - 3000:3000
+      - "6379:6379"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
-  gpt-researcher-tests:
-    image: gptresearcher/gpt-researcher-tests
-    build: ./
-    environment: 
-      OPENAI_API_KEY: ${OPENAI_API_KEY}
-      OPENAI_BASE_URL: ${OPENAI_BASE_URL}
-      TAVILY_API_KEY: ${TAVILY_API_KEY}
-      LANGCHAIN_API_KEY: ${LANGCHAIN_API_KEY}
-      LOGGING_LEVEL: INFO
-    profiles: ["test"]
-    command: >
-      /bin/sh -c "
-      pip install pytest pytest-asyncio faiss-cpu &&
-      python -m pytest tests/report-types.py &&
-      python -m pytest tests/vector-store.py
-      "
-  
-  discord-bot:
+  scraper-service:
     build:
-      context: ./docs/discord-bot
-      dockerfile: Dockerfile.dev
+      context: .
+      dockerfile: services/scraper_service/Dockerfile
+    container_name: gptr-scraper-service
     environment:
-      - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
-      - DISCORD_CLIENT_ID=${DISCORD_CLIENT_ID}
-    volumes:
-      - ./docs/discord-bot:/app
-      - /app/node_modules
+      - TAVILY_API_KEY=${TAVILY_API_KEY:-}
+      - SCRAPER_PORT=8002
     ports:
-      - 3001:3000
-    profiles: ["discord"]
-    restart: always
+      - "8002:8002"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  document-service:
+    build:
+      context: .
+      dockerfile: services/document_service/Dockerfile
+    container_name: gptr-document-service
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-}
+      - LANGCHAIN_TRACING_V2=${LANGCHAIN_TRACING_V2:-}
+      - LANGCHAIN_API_KEY=${LANGCHAIN_API_KEY:-}
+      - LANGCHAIN_PROJECT=${LANGCHAIN_PROJECT:-}
+      - LANGSMITH_TRACING=${LANGSMITH_TRACING:-}
+      - LANGSMITH_API_KEY=${LANGSMITH_API_KEY:-}
+      - LANGSMITH_PROJECT=${LANGSMITH_PROJECT:-}
+      - DOCUMENT_PORT=8003
+      - DOCS_DIR=/usr/src/app/my-docs
+    volumes:
+      - ./my-docs:/usr/src/app/my-docs:rw
+    ports:
+      - "8003:8003"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  export-service:
+    build:
+      context: .
+      dockerfile: services/export_service/Dockerfile
+    container_name: gptr-export-service
+    environment:
+      - EXPORT_PORT=8004
+      - OUTPUTS_DIR=/usr/src/app/outputs
+    volumes:
+      - ./outputs:/usr/src/app/outputs:rw
+    ports:
+      - "8004:8004"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  planning-service:
+    build:
+      context: .
+      dockerfile: services/planning_service/Dockerfile
+    container_name: gptr-planning-service
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-}
+      - FAST_LLM=${FAST_LLM:-}
+      - SMART_LLM=${SMART_LLM:-}
+      - STRATEGIC_LLM=${STRATEGIC_LLM:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - LANGCHAIN_TRACING_V2=${LANGCHAIN_TRACING_V2:-}
+      - LANGCHAIN_API_KEY=${LANGCHAIN_API_KEY:-}
+      - LANGCHAIN_PROJECT=${LANGCHAIN_PROJECT:-}
+      - LANGSMITH_TRACING=${LANGSMITH_TRACING:-}
+      - LANGSMITH_API_KEY=${LANGSMITH_API_KEY:-}
+      - LANGSMITH_PROJECT=${LANGSMITH_PROJECT:-}
+      - PLANNING_PORT=8011
+    ports:
+      - "8011:8011"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8011/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  section-research-service:
+    build:
+      context: .
+      dockerfile: services/section_research_service/Dockerfile
+    container_name: gptr-section-research-service
+    depends_on:
+      scraper-service:
+        condition: service_healthy
+      document-service:
+        condition: service_healthy
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-}
+      - FAST_LLM=${FAST_LLM:-}
+      - SMART_LLM=${SMART_LLM:-}
+      - STRATEGIC_LLM=${STRATEGIC_LLM:-}
+      - TAVILY_API_KEY=${TAVILY_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - LANGCHAIN_TRACING_V2=${LANGCHAIN_TRACING_V2:-}
+      - LANGCHAIN_API_KEY=${LANGCHAIN_API_KEY:-}
+      - LANGCHAIN_PROJECT=${LANGCHAIN_PROJECT:-}
+      - LANGSMITH_TRACING=${LANGSMITH_TRACING:-}
+      - LANGSMITH_API_KEY=${LANGSMITH_API_KEY:-}
+      - LANGSMITH_PROJECT=${LANGSMITH_PROJECT:-}
+      - SCRAPER_URL=http://scraper-service:8002
+      - DOCUMENT_URL=http://document-service:8003
+      - SECTION_RESEARCH_PORT=8012
+    ports:
+      - "8012:8012"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8012/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  reviewer-service:
+    build:
+      context: .
+      dockerfile: services/reviewer_service/Dockerfile
+    container_name: gptr-reviewer-service
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-}
+      - FAST_LLM=${FAST_LLM:-}
+      - SMART_LLM=${SMART_LLM:-}
+      - STRATEGIC_LLM=${STRATEGIC_LLM:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - LANGCHAIN_TRACING_V2=${LANGCHAIN_TRACING_V2:-}
+      - LANGCHAIN_API_KEY=${LANGCHAIN_API_KEY:-}
+      - LANGCHAIN_PROJECT=${LANGCHAIN_PROJECT:-}
+      - LANGSMITH_TRACING=${LANGSMITH_TRACING:-}
+      - LANGSMITH_API_KEY=${LANGSMITH_API_KEY:-}
+      - LANGSMITH_PROJECT=${LANGSMITH_PROJECT:-}
+      - REVIEWER_PORT=8013
+    ports:
+      - "8013:8013"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8013/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  writer-service:
+    build:
+      context: .
+      dockerfile: services/writer_service/Dockerfile
+    container_name: gptr-writer-service
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-}
+      - FAST_LLM=${FAST_LLM:-}
+      - SMART_LLM=${SMART_LLM:-}
+      - STRATEGIC_LLM=${STRATEGIC_LLM:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - LANGCHAIN_TRACING_V2=${LANGCHAIN_TRACING_V2:-}
+      - LANGCHAIN_API_KEY=${LANGCHAIN_API_KEY:-}
+      - LANGCHAIN_PROJECT=${LANGCHAIN_PROJECT:-}
+      - LANGSMITH_TRACING=${LANGSMITH_TRACING:-}
+      - LANGSMITH_API_KEY=${LANGSMITH_API_KEY:-}
+      - LANGSMITH_PROJECT=${LANGSMITH_PROJECT:-}
+      - WRITER_PORT=8014
+    ports:
+      - "8014:8014"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8014/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  research-orchestrator:
+    build:
+      context: .
+      dockerfile: services/research_orchestrator/Dockerfile
+    container_name: gptr-research-orchestrator
+    depends_on:
+      redis:
+        condition: service_healthy
+      scraper-service:
+        condition: service_healthy
+      document-service:
+        condition: service_healthy
+      export-service:
+        condition: service_healthy
+      planning-service:
+        condition: service_healthy
+      section-research-service:
+        condition: service_healthy
+      reviewer-service:
+        condition: service_healthy
+      writer-service:
+        condition: service_healthy
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-}
+      - FAST_LLM=${FAST_LLM:-}
+      - SMART_LLM=${SMART_LLM:-}
+      - STRATEGIC_LLM=${STRATEGIC_LLM:-}
+      - EMBEDDING=${EMBEDDING:-}
+      - TAVILY_API_KEY=${TAVILY_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - LANGCHAIN_TRACING_V2=${LANGCHAIN_TRACING_V2:-}
+      - LANGCHAIN_API_KEY=${LANGCHAIN_API_KEY:-}
+      - LANGCHAIN_PROJECT=${LANGCHAIN_PROJECT:-}
+      - LANGSMITH_TRACING=${LANGSMITH_TRACING:-}
+      - LANGSMITH_API_KEY=${LANGSMITH_API_KEY:-}
+      - LANGSMITH_PROJECT=${LANGSMITH_PROJECT:-}
+      - REDIS_URL=redis://redis:6379/0
+      - SCRAPER_URL=http://scraper-service:8002
+      - DOCUMENT_URL=http://document-service:8003
+      - EXPORT_URL=http://export-service:8004
+      - PLANNING_URL=http://planning-service:8011
+      - SECTION_RESEARCH_URL=http://section-research-service:8012
+      - REVIEWER_URL=http://reviewer-service:8013
+      - WRITER_URL=http://writer-service:8014
+      - ORCHESTRATOR_PORT=8001
+    ports:
+      - "8001:8001"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: services/api_gateway/Dockerfile
+    container_name: gptr-api-gateway
+    depends_on:
+      - redis
+      - research-orchestrator
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL:-}
+      - FAST_LLM=${FAST_LLM:-}
+      - SMART_LLM=${SMART_LLM:-}
+      - STRATEGIC_LLM=${STRATEGIC_LLM:-}
+      - EMBEDDING=${EMBEDDING:-}
+      - REDIS_URL=redis://redis:6379/0
+      - ORCHESTRATOR_URL=http://research-orchestrator:8001
+      - SCRAPER_URL=http://scraper-service:8002
+      - DOCUMENT_URL=http://document-service:8003
+      - EXPORT_URL=http://export-service:8004
+      - GATEWAY_PORT=8000
+      - OUTPUTS_DIR=/usr/src/app/outputs
+      - DOCS_DIR=/usr/src/app/my-docs
+    volumes:
+      - ./outputs:/usr/src/app/outputs:rw
+      - ./my-docs:/usr/src/app/my-docs:rw
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  frontend-nextjs:
+    build:
+      context: frontend/nextjs
+      dockerfile: Dockerfile.dev
+    container_name: gptr-frontend-nextjs
+    depends_on:
+      - api-gateway
+    environment:
+      - NEXT_PUBLIC_GPTR_API_URL=http://localhost:8000
+      - CHOKIDAR_USEPOLLING=true
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend/nextjs:/app
+      - /app/node_modules
+      - /app/.next
+      - ./outputs:/app/outputs
+    restart: unless-stopped
+
+  # Container composition test runner
+  test-runner:
+    build:
+      context: .
+      dockerfile: tests/Dockerfile.test
+    container_name: gptr-test-runner
+    profiles: ["test"]
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+      research-orchestrator:
+        condition: service_healthy
+      scraper-service:
+        condition: service_healthy
+      document-service:
+        condition: service_healthy
+      export-service:
+        condition: service_healthy
+    environment:
+      - GATEWAY_URL=http://api-gateway:8000
+      - ORCHESTRATOR_URL=http://research-orchestrator:8001
+      - SCRAPER_URL=http://scraper-service:8002
+      - DOCUMENT_URL=http://document-service:8003
+      - EXPORT_URL=http://export-service:8004
+    command: ["pytest", "tests/test_microservices_container.py", "tests/test_microservices.py", "-v"]

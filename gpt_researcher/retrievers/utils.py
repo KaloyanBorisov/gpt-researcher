@@ -61,7 +61,6 @@ def check_pkg(pkg: str) -> None:
 # Valid retrievers for fallback
 VALID_RETRIEVERS = [
     "tavily",
-    "groundroute",
     "custom",
     "duckduckgo",
     "searchapi",
@@ -70,16 +69,11 @@ VALID_RETRIEVERS = [
     "google",
     "searx",
     "bing",
-    "brave",
     "arxiv",
     "semantic_scholar",
     "pubmed_central",
     "exa",
-    "crw",
-    "getxapi",
     "mcp",
-    "xquik",
-    "openalex",
     "mock"
 ]
 

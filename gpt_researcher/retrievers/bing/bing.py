@@ -70,34 +70,26 @@ class BingSearch():
             return []
         try:
             search_results = json.loads(resp.text)
-            results = search_results.get("webPages", {}).get("value", [])
+            results = search_results["webPages"]["value"]
         except Exception as e:
             self.logger.error(
                 f"Error parsing Bing search results: {e}. Resulting in empty response.")
             return []
-        if not results:
+        if search_results is None:
             self.logger.warning(f"No search results found for query: {self.query}")
             return []
+        search_results = []
 
-        # Normalize the results to match the format of the other search APIs.
-        # Skip non-dict rows (API drift / error stubs) and empty URLs rather
-        # than AttributeError/'NoneType' crashes mid-research.
-        search_response = []
-        if not isinstance(results, list):
-            return []
+        # Normalize the results to match the format of the other search APIs
         for result in results:
-            if not isinstance(result, dict):
-                continue
-            url = result.get("url") or ""
-            if not url:
-                continue
             # skip youtube results
-            if "youtube.com" in url:
+            if "youtube.com" in result["url"]:
                 continue
-            search_response.append({
-                "title": result.get("name") or "",
-                "href": url,
-                "body": result.get("snippet") or "",
-            })
+            search_result = {
+                "title": result["name"],
+                "href": result["url"],
+                "body": result["snippet"],
+            }
+            search_results.append(search_result)
 
-        return search_response
+        return search_results

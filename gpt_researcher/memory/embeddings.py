@@ -49,8 +49,6 @@ _SUPPORTED_PROVIDERS = {
     "aimlapi",
     "netmind",
     "openrouter",
-    "minimax",
-    "nebius",
 }
 
 
@@ -102,8 +100,8 @@ class Memory:
                 from langchain_openai import OpenAIEmbeddings
 
                 # Support custom OpenAI-compatible APIs via OPENAI_BASE_URL
-                if "openai_api_base" not in embedding_kwargs and os.environ.get("OPENAI_BASE_URL"):
-                    embedding_kwargs["openai_api_base"] = os.environ["OPENAI_BASE_URL"]
+                if "openai_api_base" not in embedding_kwargs and os.environ.get("OPENAI_BASE_URL") and os.environ.get("OPENAI_BASE_URL").strip():
+                    embedding_kwargs["openai_api_base"] = os.environ["OPENAI_BASE_URL"].strip()
 
                 _embeddings = OpenAIEmbeddings(model=model, **embedding_kwargs)
             case "azure_openai":
@@ -197,28 +195,14 @@ class Memory:
             case "openrouter":
                 from langchain_openai import OpenAIEmbeddings
 
+                model_name = model
+                if model_name and "/" not in model_name:
+                    model_name = f"openai/{model_name}"
+
                 _embeddings = OpenAIEmbeddings(
-                    model=model,
+                    model=model_name,
                     openai_api_key=os.getenv("OPENROUTER_API_KEY"),
-                    openai_api_base="https://openrouter.ai/api/v1",
-                    **embedding_kwargs,
-                )
-            case "minimax":
-                from langchain_openai import OpenAIEmbeddings
-
-                _embeddings = OpenAIEmbeddings(
-                    model=model,
-                    openai_api_key=os.getenv("MINIMAX_API_KEY"),
-                    openai_api_base="https://api.minimax.io/v1",
-                    **embedding_kwargs,
-                )
-            case "nebius":
-                from langchain_openai import OpenAIEmbeddings
-
-                _embeddings = OpenAIEmbeddings(
-                    model=model,
-                    openai_api_key=os.getenv("NEBIUS_API_KEY"),
-                    openai_api_base=os.getenv("NEBIUS_BASE_URL", "https://api.tokenfactory.nebius.com/v1"),
+                    openai_api_base=os.getenv("OPENROUTER_BASE_URL") or os.getenv("OPENROUTER_API_BASE") or "https://openrouter.ai/api/v1",
                     **embedding_kwargs,
                 )
             case _:
